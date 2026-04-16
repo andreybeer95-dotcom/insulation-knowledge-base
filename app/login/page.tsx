@@ -13,9 +13,10 @@ export default function LoginPage() {
       setMessage("Supabase env переменные не настроены.");
       return;
     }
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin + "/admin" }
+      options: { emailRedirectTo: siteUrl + "/admin" }
     });
     if (error) setMessage(error.message);
     else setMessage("Ссылка для входа отправлена на email.");
