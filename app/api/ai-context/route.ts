@@ -1,106 +1,168 @@
-import { NextRequest, NextResponse } from "next/server";
-
-import { getServerSupabase } from "@/lib/server-supabase";
-
-export const dynamic = "force-dynamic";
-
-const KEYWORDS = ["НГ", "Г1", "котельная", "улица", "ИТП", "ЦТП", "помещение", "оцинковка", "DN", "ДУ"];
-
-function extractDuValues(query: string): number[] {
-  const matches = query.matchAll(/(?:ду|dn)\s*([0-9]{1,4})/gi);
-  return Array.from(matches).map((m) => Number(m[1])).filter((n) => !Number.isNaN(n));
-}
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 
 export async function GET(request: NextRequest) {
-  const supabase = getServerSupabase();
-  const query = new URL(request.url).searchParams.get("query");
-  if (!query) return NextResponse.json({ error: "query is required" }, { status: 400 });
+  const { searchParams } = new URL(request.url)
+  const query = searchParams.get('query') || searchParams.get('q') || ''
+  const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || '5'), 10)
 
-  const [manufacturersRes, rulesRes, notesRes] = await Promise.all([
-    supabase.from("manufacturers").select("id,name_ru,synonyms"),
-    supabase.from("selection_rules").select("*").order("priority", { ascending: true }),
+  const supabase = createClient()
+
+  const [productsRes, rulesRes, notesRes, chunksRes] = await Promise.allSettled([
+
     supabase
-      .from("knowledge_notes")
-      .select("id,title,content,tags")
-      .textSearch("search_vector", query, { type: "websearch", config: "russian" })
-      .limit(10)
-  ]);
+      .from('products')
+      .select('id, name, coating, flammability, temp_max, diameter_min, diameter_max, manufacturer_id')
+      .limit(20),
 
-  const low = query.toLowerCase();
-  const manufacturers = (manufacturersRes.data ?? []).filter((m: any) => {
-    const names = [m.name_ru, ...(m.synonyms ?? [])].map((s: string) => s.toLowerCase());
-    return names.some((n) => low.includes(n));
-  });
+    supabase
+      .from('selection_rules')
+      .select('id, title, condition, recommendation, priority')
+      .limit(10),
 
-  const duValues = extractDuValues(query);
-  const keywordMatches = KEYWORDS.filter((kw) => low.includes(kw.toLowerCase()));
+    supabase
+      .from('knowledge_notes')
+      .select('id, title, content, category')
+      .limit(8),
 
-  const { data: conversions } = duValues.length
-    ? await supabase
-        .from("diameter_conversion")
-        .select("du,outer_diameter_steel")
-        .in("du", duValues)
-    : { data: [] as any[] };
+    (async () => {
+      if (!query || query.length < 2) return { data: [], error: null }
 
-  let productsQuery = supabase
-    .from("products")
-    .select("id,name,flammability,coating,temp_max,diameter_min,diameter_max,outdoor_use,manufacturer_id");
+      const ftsQuery = query
+        .trim()
+        .split(/\s+/)
+        .filter(w => w.length >= 2)
+        .map(w => w + ':*')
+        .join(' & ')
 
-  if (manufacturers.length > 0) {
-    productsQuery = productsQuery.in(
-      "manufacturer_id",
-      manufacturers.map((m: any) => m.id)
-    );
-  }
-  if (keywordMatches.includes("НГ")) productsQuery = productsQuery.eq("flammability", "НГ");
-  if (keywordMatches.includes("Г1")) productsQuery = productsQuery.eq("flammability", "Г1");
+      if (!ftsQuery) return { data: [], error: null }
 
-  const { data: relevantProducts } = await productsQuery.limit(20);
+      const { data: rpcData, error: rpcError } = await supabase.rpc(
+        'search_chunks_ranked',
+        { search_query: ftsQuery, result_limit: limitChunks * 3 }
+      )
 
-  const applicableRules = (rulesRes.data ?? []).filter((r: any) => {
-    const haystack = `${r.condition} ${r.rule_name} ${r.rule_text}`.toLowerCase();
-    return keywordMatches.some((kw) => haystack.includes(kw.toLowerCase()));
-  });
+      if (!rpcError && rpcData?.length) return { data: rpcData, error: null }
 
-  const productIds = (relevantProducts ?? []).map((p: any) => p.id);
-  const { data: currentPrices } = productIds.length
-    ? await supabase
-        .from("prices")
-        .select("*")
-        .in("product_id", productIds)
-        .or("valid_until.is.null,valid_until.gt." + new Date().toISOString().slice(0, 10))
-        .limit(30)
-    : { data: [] as any[] };
+      const { data: ftsData, error: ftsError } = await supabase
+        .from('document_chunks')
+        .select('id, content, chunk_index, document_id, documents(id, title, manufacturers(name_ru))')
+        .textSearch('content', ftsQuery, { type: 'websearch', config: 'russian' })
+        .limit(limitChunks * 3)
 
-  const formattedContext = [
-    "=== БАЗА ЗНАНИЙ ===",
-    `Запрос: ${query}`,
-    `Производители: ${manufacturers.map((m: any) => m.name_ru).join(", ") || "не найдены"}`,
-    `ДУ/DN: ${duValues.join(", ") || "не указаны"}`,
-    "Конвертация:",
-    ...(conversions ?? []).map((d: any) => `- ДУ${d.du} -> ${d.outer_diameter_steel} мм`),
-    "Релевантные продукты:",
-    ...(relevantProducts ?? []).map((p: any) => `- ${p.name} [${p.flammability}, ${p.coating}]`),
-    "Применимые правила:",
-    ...applicableRules.map((r: any) => `- (${r.priority}) ${r.rule_name}: ${r.rule_text}`),
-    "Релевантные заметки:",
-    ...((notesRes.data ?? []).map((n: any) => `- ${n.title}: ${n.content?.slice(0, 180)}...`) as string[]),
-    "Актуальные цены:",
-    ...((currentPrices ?? []).map((p: any) => `- ${p.product_id}: ${p.price} ${p.currency}/${p.unit}`) as string[])
-  ].join("\n");
+      if (!ftsError && ftsData?.length) return { data: ftsData, error: null }
+
+      const { data: ilikeData } = await supabase
+        .from('document_chunks')
+        .select('id, content, chunk_index, document_id, documents(id, title, manufacturers(name_ru))')
+        .ilike('content', `%${query}%`)
+        .limit(limitChunks * 3)
+
+      return { data: ilikeData || [], error: null }
+    })(),
+  ])
+
+  const products = productsRes.status === 'fulfilled' ? (productsRes.value.data || []) : []
+  const rules    = rulesRes.status === 'fulfilled'    ? (rulesRes.value.data || [])    : []
+  const notes    = notesRes.status === 'fulfilled'    ? (notesRes.value.data || [])    : []
+  const rawChunks = chunksRes.status === 'fulfilled'  ? ((chunksRes.value as any).data || []) : []
+
+  const chunks = deduplicateChunks(rawChunks, limitChunks)
+
+  const formattedContext = buildContext(query, products, rules, notes, chunks)
 
   return NextResponse.json({
     query,
-    detected: {
-      manufacturers: manufacturers.map((m: any) => m.name_ru),
-      du_values: duValues,
-      converted_diameters: (conversions ?? []).map((d: any) => ({ du: d.du, outer_mm: d.outer_diameter_steel })),
-      keywords: keywordMatches
+    detected: detectContext(query),
+    relevant_products: products,
+    applicable_rules: rules,
+    relevant_notes: notes,
+    document_chunks: chunks,
+    formatted_context: formattedContext,
+    meta: {
+      products_count: products.length,
+      rules_count: rules.length,
+      notes_count: notes.length,
+      chunks_count: chunks.length,
     },
-    relevant_products: relevantProducts ?? [],
-    applicable_rules: applicableRules,
-    relevant_notes: notesRes.data ?? [],
-    current_prices: currentPrices ?? [],
-    formatted_context: formattedContext
-  });
+  })
+}
+
+function detectContext(query: string) {
+  const manufacturers = ['rockwool', 'isover', 'knauf', 'технониколь', 'paroc', 'ursa']
+    .filter(m => query.toLowerCase().includes(m))
+  const du_values = (query.match(/\b(\d{2,3})\b/g) || []).map(Number)
+  return { manufacturers, du_values, keywords: [] }
+}
+
+function deduplicateChunks(chunks: any[], limit: number): any[] {
+  const seenDocs = new Map<string, number>()
+  const seenContent = new Set<string>()
+  const result: any[] = []
+
+  for (const chunk of chunks) {
+    if (result.length >= limit) break
+    const normalized = chunk.content?.replace(/\s+/g, ' ').trim().slice(0, 200)
+    if (seenContent.has(normalized)) continue
+    const docCount = seenDocs.get(chunk.document_id) || 0
+    if (docCount >= 2) continue
+    seenContent.add(normalized)
+    seenDocs.set(chunk.document_id, docCount + 1)
+    result.push(chunk)
+  }
+  return result
+}
+
+function buildContext(query: string, products: any[], rules: any[], notes: any[], chunks: any[]): string {
+  const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
+
+  if (chunks.length) {
+    lines.push('## Из технической документации (PDF)')
+    for (const c of chunks) {
+      const doc = c.documents
+      const title = doc?.title || 'Документ'
+      const mfr = doc?.manufacturers?.name_ru
+      lines.push(`### ${title}${mfr ? ` (${mfr})` : ''}`)
+      lines.push(makeSnippet(c.content, query))
+      lines.push('')
+    }
+  }
+
+  if (products.length) {
+    lines.push('## Продукты')
+    for (const p of products) {
+      lines.push(`- **${p.name}** | ${p.flammability} | T до ${p.temp_max}°C | ДУ ${p.diameter_min}–${p.diameter_max}`)
+    }
+    lines.push('')
+  }
+
+  if (rules.length) {
+    lines.push('## Правила подбора')
+    for (const r of rules) lines.push(`- **${r.title}**: ${r.recommendation}`)
+    lines.push('')
+  }
+
+  if (notes.length) {
+    lines.push('## Заметки')
+    for (const n of notes) {
+      lines.push(`### ${n.title}`)
+      lines.push(String(n.content).slice(0, 400))
+      lines.push('')
+    }
+  }
+
+  return lines.join('\n')
+}
+
+function makeSnippet(text: string, query: string, ctx = 200): string {
+  const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2)
+  let bestIdx = -1
+  for (const w of words) {
+    const idx = text.toLowerCase().indexOf(w)
+    if (idx !== -1 && (bestIdx === -1 || idx < bestIdx)) bestIdx = idx
+  }
+  if (bestIdx === -1) return text.slice(0, ctx * 2).trim() + '...'
+  const start = Math.max(0, bestIdx - ctx)
+  const end = Math.min(text.length, bestIdx + ctx)
+  return (start > 0 ? '...' : '') + text.slice(start, end).trim() + (end < text.length ? '...' : '')
 }
