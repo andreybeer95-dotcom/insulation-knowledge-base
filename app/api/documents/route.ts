@@ -5,7 +5,7 @@ export async function GET() {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("documents")
-    .select("*, manufacturers(name_ru)")
+    .select("id, title, doc_type, file_url, file_name, manufacturer_id, created_at, manufacturers(name_ru)")
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ documents: data });
