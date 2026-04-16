@@ -16,12 +16,20 @@ export default function LoginPage() {
       setMessage("Supabase env переменные не настроены.");
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    console.log("[login] signInWithPassword:start", { email });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
+      console.log("[login] signInWithPassword:error", error.message);
       setMessage(error.message);
       return;
     }
-    router.push("/admin");
+    console.log("[login] signInWithPassword:ok", { hasUser: Boolean(data?.user), hasSession: Boolean(data?.session) });
+    if (data?.user) {
+      router.push("/admin");
+      router.refresh();
+      return;
+    }
+    setMessage("Вход выполнен, но сессия не создана. Проверьте настройки Supabase Auth.");
   };
 
   return (
