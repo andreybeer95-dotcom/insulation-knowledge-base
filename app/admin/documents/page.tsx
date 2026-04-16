@@ -17,7 +17,7 @@ export default function DocumentsPage() {
   const load = async () => {
     const r = await fetch("/api/documents");
     const d = await r.json();
-    setDocs(d.items ?? []);
+    setDocs(d.documents ?? []);
   };
   useEffect(() => {
     load();
