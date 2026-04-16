@@ -1,10 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { getBrowserSupabase } from "@/lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
   const signIn = async () => {
@@ -13,13 +16,12 @@ export default function LoginPage() {
       setMessage("Supabase env переменные не настроены.");
       return;
     }
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: siteUrl + "/admin" }
-    });
-    if (error) setMessage(error.message);
-    else setMessage("Ссылка для входа отправлена на email.");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    router.push("/admin");
   };
 
   return (
@@ -31,7 +33,16 @@ export default function LoginPage() {
         className="mb-3 w-full rounded border p-2"
         placeholder="you@company.com"
       />
-      <button onClick={signIn} className="rounded bg-slate-900 px-4 py-2 text-white">Войти по email</button>
+      <input
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        type="password"
+        className="mb-3 w-full rounded border p-2"
+        placeholder="Пароль"
+      />
+      <button onClick={signIn} className="rounded bg-slate-900 px-4 py-2 text-white">
+        Войти
+      </button>
       {message && <p className="mt-3 text-sm text-slate-600">{message}</p>}
     </main>
   );
