@@ -32,25 +32,37 @@ export default function LoginPage() {
     setMessage("Вход выполнен, но сессия не создана. Проверьте настройки Supabase Auth.");
   };
 
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    await signIn();
+  };
+
   return (
     <main className="mx-auto max-w-md p-6">
       <h1 className="mb-3 text-2xl font-bold">Вход в админку</h1>
-      <input
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="mb-3 w-full rounded border p-2"
-        placeholder="you@company.com"
-      />
-      <input
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        type="password"
-        className="mb-3 w-full rounded border p-2"
-        placeholder="Пароль"
-      />
-      <button onClick={signIn} className="rounded bg-slate-900 px-4 py-2 text-white">
-        Войти
-      </button>
+      <form onSubmit={handleSubmit}>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          autoComplete="email"
+          className="mb-3 w-full rounded border p-2"
+          placeholder="you@company.com"
+          required
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          autoComplete="current-password"
+          className="mb-3 w-full rounded border p-2"
+          placeholder="Пароль"
+          required
+        />
+        <button type="submit" className="rounded bg-slate-900 px-4 py-2 text-white">
+          Войти
+        </button>
+      </form>
       {message && <p className="mt-3 text-sm text-slate-600">{message}</p>}
     </main>
   );
