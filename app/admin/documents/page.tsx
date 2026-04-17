@@ -65,20 +65,19 @@ export default function DocumentsPage() {
           method: "POST",
           body: formData,
         });
-        let data: any = null;
-        try {
-          data = await res.clone().json();
-        } catch {
-          data = null;
-        }
-        console.log(`Ответ для ${file.name}:`, res.status, data);
+        const responseText = await res.text();
+        console.log(`Ответ для ${file.name}:`, res.status, responseText.slice(0, 200));
 
         if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Сервер вернул ${res.status}: ${text.slice(0, 150)}`);
+          throw new Error(`Сервер вернул ${res.status}: ${responseText.slice(0, 150)}`);
         }
 
-        data = await res.json();
+        let data: any = null;
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(`Невалидный JSON от сервера: ${responseText.slice(0, 100)}`);
+        }
 
         if (data.warning || data.chunks_created === 0) {
           queue[i].status = "scan";
@@ -279,6 +278,7 @@ export default function DocumentsPage() {
           {docs.map((d) => {
             const status = getChunkStatus(d);
             return (
+            <>
             <tr key={d.id} className="border-b">
               <td className="p-2">{d.doc_type ?? "-"}</td>
               <td className="p-2">{d.title ?? "-"}</td>
@@ -364,6 +364,7 @@ export default function DocumentsPage() {
                 </td>
               </tr>
             )}
+            </>
             );
           })}
           {docs.length === 0 && (
