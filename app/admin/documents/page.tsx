@@ -100,7 +100,13 @@ export default function DocumentsPage() {
     await fetchDocuments();
   }, [fetchDocuments]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { "application/pdf": [".pdf"] },
+    multiple: true,
+    maxFiles: 20,
+    maxSize: 50 * 1024 * 1024,
+  });
 
   const remove = async (id: string) => {
     if (!confirm("Удалить документ?")) return;
