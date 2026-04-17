@@ -102,26 +102,38 @@ async function extractAndChunk(documentId: string, buffer: Buffer) {
     const supabase = createClient();
     const pdfParse = (await import("pdf-parse")).default as any;
     const parsedPdf = await pdfParse(buffer);
-    const extractedText = parsedPdf.text?.trim() || "";
+    let extractedText = parsedPdf.text?.trim() || "";
 
     if (extractedText.length < 50) {
-      const { data: existingDoc } = await supabase
-        .from("documents")
-        .select("notes")
-        .eq("id", documentId)
-        .single();
-      const existingNotes = existingDoc?.notes as string | null;
+      console.log(`📸 Скан обнаружен, запускаем OCR: ${documentId}`);
 
-      await supabase
-        .from("documents")
-        .update({
-          extracted_text: "",
-          notes: (existingNotes ? existingNotes + "\n" : "") + "[СКАН: текст не извлечён, требуется OCR]"
-        })
-        .eq("id", documentId);
+      try {
+        const { extractTextWithOCR } = await import("@/lib/ocr");
+        const ocrText = await extractTextWithOCR(buffer);
 
-      console.warn(`⚠️ PDF-скан без извлечённого текста: ${documentId}`);
-      return { success: true, warning: "PDF является сканом — текст не извлечён", chunks_created: 0 };
+        if (ocrText.length > 50) {
+          console.log(`✅ OCR успешен, символов: ${ocrText.length}`);
+          extractedText = ocrText;
+        } else {
+          throw new Error("OCR вернул пустой текст");
+        }
+      } catch (ocrErr) {
+        console.error("❌ OCR ошибка:", ocrErr);
+        const { data: existingDoc } = await supabase
+          .from("documents")
+          .select("notes")
+          .eq("id", documentId)
+          .single();
+        const existingNotes = (existingDoc?.notes as string | null) ?? "";
+        await supabase
+          .from("documents")
+          .update({
+            extracted_text: "",
+            notes: `${existingNotes}\n[СКАН: OCR не удался]`
+          })
+          .eq("id", documentId);
+        return { success: true, warning: "OCR не удался", chunks_created: 0 };
+      }
     }
 
     const chunks = splitTextIntoChunks(extractedText, 1000, 200);

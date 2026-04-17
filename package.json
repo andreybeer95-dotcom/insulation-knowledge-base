@@ -13,8 +13,9 @@
     "@hookform/resolvers": "^3.9.1",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.8",
-    "pdf-parse": "^1.1.1",
     "next": "^14.2.25",
+    "pdf-parse": "^1.1.1",
+    "pdf2pic": "^3.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.8",
@@ -22,7 +23,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/node": "^22.14.1",
+    "@types/node": "^22.19.17",
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",
     "autoprefixer": "^10.4.21",
