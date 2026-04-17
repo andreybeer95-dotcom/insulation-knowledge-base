@@ -15,7 +15,6 @@
     "@supabase/supabase-js": "^2.49.8",
     "next": "^14.2.25",
     "pdf-parse": "^1.1.1",
-    "pdf2pic": "^3.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.8",
