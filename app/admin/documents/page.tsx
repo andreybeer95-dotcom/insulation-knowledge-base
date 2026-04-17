@@ -6,13 +6,6 @@ import { useDropzone } from "react-dropzone";
 export const dynamic = "force-dynamic";
 
 export default function DocumentsPage() {
-  type UploadItem = {
-    name: string;
-    status: "pending" | "uploading" | "success" | "error" | "scan";
-    chunks?: number;
-    error?: string;
-  };
-
   const [docs, setDocs] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<any[]>([]);
   const [title, setTitle] = useState("");
@@ -20,14 +13,22 @@ export default function DocumentsPage() {
   const [manufacturerId, setManufacturerId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
-  const [uploadStatus, setUploadStatus] = useState<string>("");
-  const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<Array<{
+    name: string;
+    status: "pending" | "uploading" | "success" | "scan" | "error";
+    chunks?: number;
+    error?: string;
+  }>>([]);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [manualTextDocId, setManualTextDocId] = useState<string | null>(null);
+  const [manualText, setManualText] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     const r = await fetch("/api/documents");
     const d = await r.json();
     setDocs(d.documents ?? []);
-  };
+  }, []);
   useEffect(() => {
     fetchDocuments();
     fetch("/api/manufacturers")
@@ -36,70 +37,68 @@ export default function DocumentsPage() {
   }, []);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!acceptedFiles.length) return;
-    setBusy(true);
-    setError("");
-    setUploadStatus(`Подготовка к загрузке: ${acceptedFiles.length} файлов`);
-    setUploadQueue(acceptedFiles.map((file) => ({ name: file.name, status: "pending" })));
-    const results: Array<{ file: string; success: boolean; chunks?: number; error?: string }> = [];
+    if (acceptedFiles.length === 0) return;
+
+    // Показываем очередь файлов
+    const queue = acceptedFiles.map(f => ({
+      name: f.name,
+      status: "pending" as "pending" | "uploading" | "success" | "scan" | "error",
+      chunks: undefined as number | undefined,
+      error: undefined as string | undefined,
+    }));
+    setUploadQueue([...queue]);
 
     for (let i = 0; i < acceptedFiles.length; i++) {
       const file = acceptedFiles[i];
-      setUploadStatus(`Загружается ${i + 1} из ${acceptedFiles.length}: ${file.name}`);
-      setUploadQueue((prev) => prev.map((item) => (item.name === file.name ? { ...item, status: "uploading" } : item)));
-      try {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("title", title || file.name);
-        form.append("doc_type", docType);
-        if (manufacturerId) form.append("manufacturer_id", manufacturerId);
 
-        const res = await fetch("/api/documents", { method: "POST", body: form });
-        const data = await res.json();
+      queue[i].status = "uploading";
+      setUploadQueue([...queue]);
+      setUploadStatus(`⏳ Загружается ${i + 1} из ${acceptedFiles.length}: ${file.name}`);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/documents", {
+          method: "POST",
+          body: formData,
+        });
+
         if (!res.ok) {
-          results.push({ file: file.name, success: false, error: data?.error ?? "Ошибка загрузки" });
-          setUploadQueue((prev) =>
-            prev.map((item) =>
-              item.name === file.name
-                ? { ...item, status: "error", error: data?.error ?? "Ошибка загрузки" }
-                : item
-            )
-          );
-          continue;
+          const text = await res.text();
+          throw new Error(`Сервер вернул ${res.status}: ${text.slice(0, 150)}`);
         }
-        const isScan = Boolean(data?.warning) || Number(data?.chunks_created ?? 0) === 0;
-        const chunks = Number(data?.chunks_created ?? 0);
-        results.push({ file: file.name, success: true, chunks });
-        setUploadQueue((prev) =>
-          prev.map((item) =>
-            item.name === file.name
-              ? {
-                  ...item,
-                  status: isScan ? "scan" : "success",
-                  chunks
-                }
-              : item
-          )
-        );
-      } catch (e) {
-        const errText = String(e);
-        results.push({ file: file.name, success: false, error: errText });
-        setUploadQueue((prev) =>
-          prev.map((item) => (item.name === file.name ? { ...item, status: "error", error: errText } : item))
-        );
+
+        const data = await res.json();
+
+        if (data.warning || data.chunks_created === 0) {
+          queue[i].status = "scan";
+          queue[i].chunks = 0;
+        } else {
+          queue[i].status = "success";
+          queue[i].chunks = data.chunks_created ?? 0;
+        }
+      } catch (err) {
+        queue[i].status = "error";
+        queue[i].error = err instanceof Error ? err.message : String(err);
+        console.error(`Ошибка: ${file.name}`, err);
+      }
+
+      setUploadQueue([...queue]);
+      
+      // Пауза 300мс между файлами
+      if (i < acceptedFiles.length - 1) {
+        await new Promise(r => setTimeout(r, 300));
       }
     }
 
-    const successCount = results.filter((r) => r.success).length;
-    setUploadStatus(`Готово: ${successCount} из ${acceptedFiles.length} файлов`);
-    const failed = results.filter((r) => !r.success);
-    if (failed.length > 0) {
-      setError(`Не удалось загрузить ${failed.length} файл(ов). См. консоль.`);
-    }
-    console.log("Результаты загрузки:", results);
+    const ok = queue.filter(q => q.status === "success").length;
+    const scan = queue.filter(q => q.status === "scan").length;
+    const err = queue.filter(q => q.status === "error").length;
+    setUploadStatus(`✅ ${ok} загружено  ⚠️ ${scan} сканов  ❌ ${err} ошибок`);
+    
     await fetchDocuments();
-    setBusy(false);
-  }, [title, docType, manufacturerId]);
+  }, [fetchDocuments]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
@@ -112,7 +111,7 @@ export default function DocumentsPage() {
     if (!res.ok) {
       setError(payload?.error ?? "Ошибка удаления");
     } else {
-      await load();
+      await fetchDocuments();
     }
     setBusy(false);
   };
@@ -147,8 +146,32 @@ export default function DocumentsPage() {
     } else if (payload?.warning) {
       setError(payload.warning);
     }
-    await load();
+    await fetchDocuments();
     setBusy(false);
+  };
+
+  const saveManualText = async (id: string) => {
+    if (manualText.trim().length < 50) {
+      setError("Текст слишком короткий (минимум 50 символов)");
+      return;
+    }
+    setManualBusy(true);
+    setError("");
+    const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manual_text: manualText })
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      setError(payload?.error ?? "Ошибка сохранения текста");
+      setManualBusy(false);
+      return;
+    }
+    setManualText("");
+    setManualTextDocId(null);
+    await fetchDocuments();
+    setManualBusy(false);
   };
 
   return (
@@ -191,48 +214,37 @@ export default function DocumentsPage() {
         <input {...getInputProps()} disabled={busy} />
         {isDragActive ? "Отпустите файл для загрузки" : "Перетащите PDF сюда или кликните для выбора"}
       </div>
-      {busy && <p className="mb-3 text-sm text-slate-600">Загрузка/обработка...</p>}
-      {uploadStatus && <p className="mb-3 text-sm text-slate-600">{uploadStatus}</p>}
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+      {/* Статус загрузки */}
+      {uploadStatus && (
+        <p className="mt-2 text-sm font-medium text-gray-700">{uploadStatus}</p>
+      )}
+
+      {/* Очередь файлов */}
       {uploadQueue.length > 0 && (
-        <ul className="mb-4 space-y-1 text-sm">
-          {uploadQueue.map((item, idx) => {
-            if (item.status === "pending") {
-              return (
-                <li key={`${item.name}-${idx}`} className="text-slate-500">
-                  ⏳ {item.name} — ожидает
-                </li>
-              );
-            }
-            if (item.status === "uploading") {
-              return (
-                <li key={`${item.name}-${idx}`} className="animate-pulse text-blue-600">
-                  🔄 {item.name} — загружается
-                </li>
-              );
-            }
-            if (item.status === "success") {
-              return (
-                <li key={`${item.name}-${idx}`} className="text-green-600">
-                  ✅ {item.name} — чанков: {item.chunks ?? 0}
-                </li>
-              );
-            }
-            if (item.status === "scan") {
-              return (
-                <li key={`${item.name}-${idx}`} className="text-yellow-700">
-                  ⚠️ {item.name} — Скан PDF — OCR не выполнен
-                </li>
-              );
-            }
-            return (
-              <li key={`${item.name}-${idx}`} className="text-red-600">
-                ❌ {item.name} — {item.error ?? "Ошибка загрузки"}
-              </li>
-            );
-          })}
+        <ul className="mt-3 space-y-1 text-sm">
+          {uploadQueue.map((item, idx) => (
+            <li key={idx} className="flex items-center gap-2">
+              {item.status === "pending"   && <span className="text-gray-400">⏳</span>}
+              {item.status === "uploading" && <span className="text-blue-500 animate-pulse">🔄</span>}
+              {item.status === "success"   && <span className="text-green-600">✅</span>}
+              {item.status === "scan"      && <span className="text-yellow-500">⚠️</span>}
+              {item.status === "error"     && <span className="text-red-500">❌</span>}
+              <span className={
+                item.status === "error" ? "text-red-600" :
+                item.status === "success" ? "text-green-700" :
+                item.status === "scan" ? "text-yellow-700" : "text-gray-600"
+              }>
+                {item.name}
+                {item.status === "success" && ` — ${item.chunks} чанков`}
+                {item.status === "scan" && " — Скан PDF"}
+                {item.status === "error" && ` — ${item.error}`}
+              </span>
+            </li>
+          ))}
         </ul>
       )}
+      {busy && <p className="mb-3 text-sm text-slate-600">Загрузка/обработка...</p>}
+      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       <table className="min-w-full text-sm">
         <thead>
@@ -267,6 +279,20 @@ export default function DocumentsPage() {
                 <span className={`inline-block rounded px-2 py-1 text-xs ${status.className}`}>
                   {status.label}
                 </span>
+                {status.type === "scan" && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => {
+                        setManualTextDocId((prev) => (prev === d.id ? null : d.id));
+                        setManualText("");
+                      }}
+                      className="text-xs text-blue-600 underline disabled:opacity-50"
+                      disabled={busy || manualBusy}
+                    >
+                      Загрузить текст вручную
+                    </button>
+                  </div>
+                )}
               </td>
               <td className="p-2 text-center">{new Date(d.created_at).toLocaleDateString()}</td>
               <td className="p-2 text-center">
@@ -288,6 +314,41 @@ export default function DocumentsPage() {
                 </button>
               </td>
             </tr>
+            {manualTextDocId === d.id && (
+              <tr className="border-b bg-slate-50">
+                <td className="p-2" colSpan={9}>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Вставьте текст из скана</p>
+                    <textarea
+                      value={manualText}
+                      onChange={(e) => setManualText(e.target.value)}
+                      rows={6}
+                      className="w-full rounded border p-2 text-sm"
+                      placeholder="Вставьте извлечённый текст (OCR)..."
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => saveManualText(d.id)}
+                        className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+                        disabled={manualBusy}
+                      >
+                        Сохранить и нарезать
+                      </button>
+                      <button
+                        onClick={() => {
+                          setManualTextDocId(null);
+                          setManualText("");
+                        }}
+                        className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                        disabled={manualBusy}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            )}
             );
           })}
           {docs.length === 0 && (
