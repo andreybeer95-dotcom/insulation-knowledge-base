@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+export const maxDuration = 60;
+
 export async function GET() {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("documents")
-    .select("id, title, doc_type, file_url, file_name, manufacturer_id, created_at, manufacturers(name_ru)")
+    .select("id, title, doc_type, file_url, file_name, manufacturer_id, notes, created_at, manufacturers(name_ru), document_chunks(count)")
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ documents: data });
+  const documents = (data ?? []).map((d: any) => ({
+    ...d,
+    chunks_count: d.document_chunks?.[0]?.count ?? 0
+  }));
+  return NextResponse.json({ documents });
 }
 
 export async function POST(request: NextRequest) {
@@ -91,16 +97,30 @@ async function extractAndChunk(documentId: string, buffer: Buffer) {
   try {
     const supabase = createClient();
     const pdfParse = (await import("pdf-parse")).default as any;
-    const pdfData = await pdfParse(buffer);
-    const text = pdfData.text as string;
+    const parsedPdf = await pdfParse(buffer);
+    const extractedText = parsedPdf.text?.trim() || "";
 
-    const chunkSize = 800;
-    const overlap = 100;
-    const chunks: string[] = [];
-    for (let i = 0; i < text.length; i += chunkSize - overlap) {
-      const chunk = text.slice(i, i + chunkSize).trim();
-      if (chunk.length > 50) chunks.push(chunk);
+    if (extractedText.length < 50) {
+      const { data: existingDoc } = await supabase
+        .from("documents")
+        .select("notes")
+        .eq("id", documentId)
+        .single();
+      const existingNotes = existingDoc?.notes as string | null;
+
+      await supabase
+        .from("documents")
+        .update({
+          extracted_text: "",
+          notes: (existingNotes ? existingNotes + "\n" : "") + "[СКАН: текст не извлечён, требуется OCR]"
+        })
+        .eq("id", documentId);
+
+      console.warn(`⚠️ PDF-скан без извлечённого текста: ${documentId}`);
+      return { success: true, warning: "PDF является сканом — текст не извлечён", chunks_created: 0 };
     }
+
+    const chunks = splitTextIntoChunks(extractedText, 1000, 200);
 
     if (chunks.length > 0) {
       await supabase.from("document_chunks").insert(
@@ -108,15 +128,26 @@ async function extractAndChunk(documentId: string, buffer: Buffer) {
           document_id: documentId,
           content: chunk,
           chunk_index: index,
-          metadata: { total_chunks: chunks.length, pages: pdfData.numpages }
+          metadata: { total_chunks: chunks.length, pages: parsedPdf.numpages }
         }))
       );
     }
 
-    await supabase.from("documents").update({ extracted_text: text.slice(0, 10000) }).eq("id", documentId);
+    await supabase.from("documents").update({ extracted_text: extractedText.slice(0, 10000) }).eq("id", documentId);
 
-    console.log(`✅ PDF обработан: ${documentId}, страниц: ${pdfData.numpages}, чанков: ${chunks.length}`);
+    console.log(`✅ PDF обработан: ${documentId}, страниц: ${parsedPdf.numpages}, чанков: ${chunks.length}`);
   } catch (e) {
     console.error(`❌ Ошибка обработки PDF ${documentId}:`, e);
   }
+}
+
+function splitTextIntoChunks(text: string, chunkSize = 1000, overlap = 200): string[] {
+  const chunks: string[] = [];
+  if (!text?.trim()) return chunks;
+  const step = Math.max(1, chunkSize - overlap);
+  for (let i = 0; i < text.length; i += step) {
+    const chunk = text.slice(i, i + chunkSize).trim();
+    if (chunk.length > 50) chunks.push(chunk);
+  }
+  return chunks;
 }
