@@ -18,6 +18,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  console.log("=== UPLOAD START ===", new Date().toISOString());
   const supabase = createClient();
   const contentType = request.headers.get("content-type") || "";
 
@@ -61,7 +62,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Ошибка БД: " + dbError.message }, { status: 500 });
     }
 
-    extractAndChunk(doc.id, buffer).catch(console.error);
+    const extractionResult = await extractAndChunk(doc.id, buffer);
+    const documentId = doc.id;
+    const chunksCreated = extractionResult?.chunks_created ?? 0;
+    console.log("=== UPLOAD END ===", { documentId, chunksCreated, fileName });
 
     return NextResponse.json({ document: doc }, { status: 201 });
   }
@@ -136,8 +140,10 @@ async function extractAndChunk(documentId: string, buffer: Buffer) {
     await supabase.from("documents").update({ extracted_text: extractedText.slice(0, 10000) }).eq("id", documentId);
 
     console.log(`✅ PDF обработан: ${documentId}, страниц: ${parsedPdf.numpages}, чанков: ${chunks.length}`);
+    return { success: true, chunks_created: chunks.length };
   } catch (e) {
     console.error(`❌ Ошибка обработки PDF ${documentId}:`, e);
+    return { success: false, chunks_created: 0 };
   }
 }
 

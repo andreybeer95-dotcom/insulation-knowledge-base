@@ -38,6 +38,7 @@ export default function DocumentsPage() {
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
+    console.log("onDrop вызван, файлов:", acceptedFiles.length, acceptedFiles.map(f => f.name));
 
     // Показываем очередь файлов
     const queue = acceptedFiles.map(f => ({
@@ -58,18 +59,26 @@ export default function DocumentsPage() {
       try {
         const formData = new FormData();
         formData.append("file", file);
+        console.log(`Отправляю файл ${i + 1}/${acceptedFiles.length}:`, file.name, file.size);
 
         const res = await fetch("/api/documents", {
           method: "POST",
           body: formData,
         });
+        let data: any = null;
+        try {
+          data = await res.clone().json();
+        } catch {
+          data = null;
+        }
+        console.log(`Ответ для ${file.name}:`, res.status, data);
 
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`Сервер вернул ${res.status}: ${text.slice(0, 150)}`);
         }
 
-        const data = await res.json();
+        data = await res.json();
 
         if (data.warning || data.chunks_created === 0) {
           queue[i].status = "scan";
