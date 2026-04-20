@@ -1,99 +1,71 @@
 # Insulation Knowledge Base
 
-Веб-приложение базы знаний по теплоизоляционным цилиндрам на `Next.js + Supabase + Tailwind CSS`.
+Обновлённый набор для AI-подбора и интеграции с n8n:
 
-## Реализовано
+- `001_knowledge_base_schema.sql` — основная схема (enum, категории, связи, синхронизация чанков, RPC).
+- `002_seed_data.sql` — начальные производители/категории/SKU.
+- `003_api_context_route.ts` — новый пример `GET /api/ai-context` с фильтрами.
 
-- Supabase схема и миграции (10 таблиц, индексы, RLS, FTS, storage bucket `documents`).
-- Seed-данные в `supabase/seed.sql`.
-- API routes:
-  - `/api/products` (GET, POST), `/api/products/[id]` (GET, PUT, DELETE)
-  - `/api/search`
-  - `/api/diameter-convert`
-  - `/api/certificates`
-  - `/api/ai-context`
-  - `/api/rules` (GET, POST, PUT)
-  - `/api/manufacturers` (GET, POST)
-  - `/api/documents` (GET, POST)
-  - `/api/documents/extract` (POST, `pdf-parse`)
-  - `/api/notes` (GET, POST, PUT, DELETE)
-  - `/api/prices` (GET, POST)
-- Admin UI:
-  - `/admin/products`, `/admin/products/new`, `/admin/products/edit/[id]`
-  - `/admin/documents`, `/admin/notes`, `/admin/certificates`
-  - `/admin/rules`, `/admin/prices`, `/admin/changelog`, `/admin/manufacturers`
-- Базовая auth-защита `/admin` через Supabase session cookies + страница `/login`.
+## Порядок запуска после миграции
 
-## 1) Как запустить миграции в Supabase
-
-1. Установите [Supabase CLI](https://supabase.com/docs/guides/cli).
-2. В корне проекта выполните:
-
-```bash
-supabase login
-supabase link --project-ref <YOUR_PROJECT_REF>
-supabase db push
+1. Применить SQL схему:
+```sql
+-- в Supabase SQL Editor
+-- выполнить содержимое 001_knowledge_base_schema.sql
 ```
 
-Альтернатива: открыть SQL Editor в Supabase и выполнить по очереди SQL из:
-- `supabase/migrations/20260415162000_init_knowledge_base.sql`
-- `supabase/migrations/20260415170000_expand_product_coating_values.sql`
-
-## 2) Как залить seed-данные
-
-Вариант A (через CLI):
-
-```bash
-supabase db reset
+2. Применить seed:
+```sql
+-- выполнить содержимое 002_seed_data.sql
 ```
 
-`db reset` применит миграции и `supabase/seed.sql`.
-
-Вариант B (через SQL Editor):
-- Выполните содержимое `supabase/seed.sql` вручную после миграций.
-
-## 3) Как запустить проект локально
-
-1. Установите зависимости:
-
-```bash
-npm install
+3. Проверить синхронизацию чанков:
+```sql
+-- массовая синхронизация существующих документов
+update public.documents
+set extracted_text = extracted_text
+where coalesce(extracted_text, '') <> '';
 ```
 
-2. Создайте `.env.local` (можно скопировать `.env.local.example`) и заполните:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-3. Запустите dev-сервер:
-
-```bash
-npm run dev
+4. Проверить RPC для n8n:
+```sql
+select * from public.get_ai_context(
+  p_query := 'цилиндр du 108 фольга',
+  p_intents := array['selection','manager'],
+  p_doc_types := array['script','tds'],
+  p_product_id := null,
+  p_limit := 10
+);
 ```
 
-4. Откройте:
-- `http://localhost:3000`
-- `http://localhost:3000/admin`
+## Новый `/api/ai-context`
 
-## 4) Как подключить n8n к `/api/ai-context`
+Поддерживаемые query-параметры:
 
-1. В n8n создайте `HTTP Request` node:
-   - Method: `GET`
-   - URL: `http://localhost:3000/api/ai-context`
-   - Query param: `query={{$json.user_query}}`
+- `query` или `q` — текст вопроса.
+- `intent=selection,manager` — фильтр по intent tags.
+- `doc_types=script,tds` — фильтр по типам документа.
+- `product_id=<uuid>` — жёсткий фильтр по продукту.
+- `limit=12` — лимит элементов контекста.
 
-2. Формат ответа endpoint:
-- `detected` (производители, ДУ, ключевые слова)
-- `relevant_products`
-- `applicable_rules`
-- `relevant_notes`
-- `current_prices`
-- `formatted_context` (готовый контекст для Claude API как system/input prompt)
+## intent_tags по типам вопросов
 
-3. Дальше передайте `formatted_context` в node с LLM (Claude/OpenAI) как системный контекст.
+| Тип вопроса | intent_tags |
+|---|---|
+| Подбор SKU | `selection` |
+| Что сказать клиенту | `manager`, `script` |
+| Сравнение брендов | `comparison` |
+| Совместимость узлов | `compatibility` |
+| Цена/смета | `price` |
+| Доставка/сроки | `delivery` |
+| Сертификаты/ТУ | `certificate` |
+| FAQ / возражения | `faq` |
 
-## Примечания
+## Что важно для n8n
 
-- Для загрузки документов используйте bucket `documents`.
-- Для write-операций в `/api/products` требуется `Authorization: Bearer <access_token>`.
+- n8n может вызывать `RPC get_ai_context` напрямую через Supabase.
+- Либо использовать route `/api/ai-context` (пример в `003_api_context_route.ts`).
+- Внизу `003_api_context_route.ts` уже есть `SYSTEM_PROMPT_N8N` с правилами:
+  - приоритет кода товара,
+  - правила подбора,
+  - допродажи (upsell/cross-sell).

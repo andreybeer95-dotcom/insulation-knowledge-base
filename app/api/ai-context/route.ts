@@ -1,78 +1,126 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+// ─── типы ────────────────────────────────────────────────────
+interface ChunkRow {
+  id: string
+  content: string
+  chunk_index: number
+  document_id: string
+  doc_type?: string
+  priority_weight?: number
+  intent_tags?: string[]
+  metadata?: Record<string, unknown>
+  documents?: {
+    id: string
+    title: string
+    doc_type?: string
+    manufacturers?: { name_ru: string } | { name_ru: string }[]
+  }
+  // поля из get_ai_context RPC
+  chunk_id?: string
+  chunk_content?: string
+  doc_title?: string
+  product_name?: string
+  product_kod?: string
+  manufacturer?: string
+  rank?: number
+}
+
+function normalizeChunk(raw: Record<string, unknown>): ChunkRow {
+  const docRaw = raw['documents']
+  const doc = Array.isArray(docRaw) ? docRaw[0] : docRaw
+  const mfrRaw = (doc as any)?.manufacturers
+  const mfr = Array.isArray(mfrRaw) ? mfrRaw[0] : mfrRaw
+  return {
+    id:              String(raw['id'] ?? ''),
+    content:         String(raw['content'] ?? ''),
+    chunk_index:     Number(raw['chunk_index'] ?? 0),
+    document_id:     String(raw['document_id'] ?? ''),
+    doc_type:        raw['doc_type'] as string | undefined,
+    priority_weight: raw['priority_weight'] as number | undefined,
+    intent_tags:     raw['intent_tags'] as string[] | undefined,
+    metadata:        raw['metadata'] as Record<string, unknown> | undefined,
+    documents: doc
+      ? {
+          id:            String((doc as any).id ?? ''),
+          title:         String((doc as any).title ?? ''),
+          doc_type:      (doc as any).doc_type as string | undefined,
+          manufacturers: mfr ?? undefined,
+        }
+      : undefined,
+  }
+}
+
+// ─── route ───────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const query = searchParams.get('query') || searchParams.get('q') || ''
-  const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || '5'), 10)
+
+  // старые параметры (обратная совместимость)
+  const query       = searchParams.get('query') || searchParams.get('q') || ''
+  const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || searchParams.get('limit') || '5'), 10)
+
+  // новые параметры
+  const product_id  = searchParams.get('product_id')  || null
+  const category_id = searchParams.get('category_id') || null
+  const intentRaw   = searchParams.get('intent')       // 'selection,manager'
+  const docTypesRaw = searchParams.get('doc_types')    // 'script,tds'
+
+  const intent_tags   = intentRaw   ? intentRaw.split(',').map(s => s.trim())   : null
+  const doc_types_arr = docTypesRaw ? docTypesRaw.split(',').map(s => s.trim()) : null
 
   const supabase = createClient()
 
+  // ─── параллельные запросы ─────────────────────────────────
   const [productsRes, rulesRes, notesRes, chunksRes] = await Promise.allSettled([
 
+    // продукты — теперь тянем из новой схемы с атрибутами
     supabase
       .from('products')
-      .select('id, name, coating, flammability, temp_max, diameter_min, diameter_max, manufacturer_id')
+      .select(`
+        id, kod_1c, name, coating, flammability,
+        temp_max, temp_min, diameter_min, diameter_max,
+        density, thickness, in_stock,
+        manufacturer_id, manufacturers(name_ru),
+        category_id, categories(name, full_path)
+      `)
+      .eq(product_id ? 'id' : 'in_stock', product_id ?? true)
       .limit(20),
 
+    // правила подбора (таблица осталась прежней)
     supabase
       .from('selection_rules')
       .select('id, title, condition, recommendation, priority')
       .limit(10),
 
+    // заметки (таблица осталась прежней)
     supabase
       .from('knowledge_notes')
       .select('id, title, content, category')
       .limit(8),
 
-    (async () => {
-      if (!query || query.length < 2) return { data: [], error: null }
-
-      const ftsQuery = query
-        .trim()
-        .split(/\s+/)
-        .filter(w => w.length >= 2)
-        .map(w => w + ':*')
-        .join(' & ')
-
-      if (!ftsQuery) return { data: [], error: null }
-
-      const { data: rpcData, error: rpcError } = await supabase.rpc(
-        'search_chunks_ranked',
-        { search_query: ftsQuery, result_limit: limitChunks * 3 }
-      )
-
-      if (!rpcError && rpcData?.length) return { data: rpcData, error: null }
-
-      const { data: ftsData, error: ftsError } = await supabase
-        .from('document_chunks')
-        .select('id, content, chunk_index, document_id, documents(id, title, manufacturers(name_ru))')
-        .textSearch('content', ftsQuery, { type: 'websearch', config: 'russian' })
-        .limit(limitChunks * 3)
-
-      if (!ftsError && ftsData?.length) return { data: ftsData, error: null }
-
-      const { data: ilikeData } = await supabase
-        .from('document_chunks')
-        .select('id, content, chunk_index, document_id, documents(id, title, manufacturers(name_ru))')
-        .ilike('content', `%${query}%`)
-        .limit(limitChunks * 3)
-
-      return { data: ilikeData || [], error: null }
-    })(),
+    // чанки — пробуем новую RPC сначала, fallback на старую логику
+    searchChunks(supabase, {
+      query,
+      limitChunks,
+      product_id,
+      category_id,
+      intent_tags,
+      doc_types_arr,
+    }),
   ])
 
-  const products = productsRes.status === 'fulfilled' ? (productsRes.value.data || []) : []
-  const rules    = rulesRes.status === 'fulfilled'    ? (rulesRes.value.data || [])    : []
-  const notes    = notesRes.status === 'fulfilled'    ? (notesRes.value.data || [])    : []
-  const rawChunks = chunksRes.status === 'fulfilled'  ? ((chunksRes.value as any).data || []) : []
+  const products  = productsRes.status === 'fulfilled' ? (productsRes.value.data ?? []) : []
+  const rules     = rulesRes.status    === 'fulfilled' ? (rulesRes.value.data    ?? []) : []
+  const notes     = notesRes.status    === 'fulfilled' ? (notesRes.value.data    ?? []) : []
+  const rawChunks = chunksRes.status   === 'fulfilled' ? chunksRes.value          : []
 
   const chunks = deduplicateChunks(rawChunks, limitChunks)
-
   const formattedContext = buildContext(query, products, rules, notes, chunks)
 
   return NextResponse.json({
     query,
+    filters: { product_id, category_id, intent_tags, doc_types: doc_types_arr },
     detected: detectContext(query),
     relevant_products: products,
     applicable_rules: rules,
@@ -81,24 +129,115 @@ export async function GET(request: NextRequest) {
     formatted_context: formattedContext,
     meta: {
       products_count: products.length,
-      rules_count: rules.length,
-      notes_count: notes.length,
-      chunks_count: chunks.length,
+      rules_count:    rules.length,
+      notes_count:    notes.length,
+      chunks_count:   chunks.length,
     },
   })
 }
 
-function detectContext(query: string) {
-  const manufacturers = ['rockwool', 'isover', 'knauf', 'технониколь', 'paroc', 'ursa']
-    .filter(m => query.toLowerCase().includes(m))
-  const du_values = (query.match(/\b(\d{2,3})\b/g) || []).map(Number)
-  return { manufacturers, du_values, keywords: [] }
+// ─── поиск чанков: новая RPC → старая RPC → FTS → ILIKE ──────
+async function searchChunks(
+  supabase: ReturnType<typeof createClient>,
+  opts: {
+    query:        string
+    limitChunks:  number
+    product_id:   string | null
+    category_id:  string | null
+    intent_tags:  string[] | null
+    doc_types_arr: string[] | null
+  }
+): Promise<ChunkRow[]> {
+  const { query, limitChunks, product_id, category_id, intent_tags, doc_types_arr } = opts
+
+  // 1. Новая RPC get_ai_context (приоритет + фильтры)
+  if (query.length >= 2) {
+    const { data: rpcNew, error: rpcNewErr } = await supabase.rpc('get_ai_context', {
+      p_query:       query,
+      p_product_id:  product_id,
+      p_category_id: category_id,
+      p_doc_types:   doc_types_arr,
+      p_intent_tags: intent_tags,
+      p_limit:       limitChunks * 2,
+    })
+
+    if (!rpcNewErr && rpcNew?.length) {
+      // нормализуем поля RPC к формату ChunkRow
+      return (rpcNew as ChunkRow[]).map(r => ({
+        id:              r.chunk_id ?? r.id,
+        content:         r.chunk_content ?? r.content,
+        chunk_index:     0,
+        document_id:     '',
+        doc_type:        r.doc_type,
+        priority_weight: r.priority_weight,
+        intent_tags:     r.intent_tags,
+        metadata:        r.metadata,
+        documents: {
+          id:            '',
+          title:         r.doc_title ?? '',
+          manufacturers: r.manufacturer ? { name_ru: r.manufacturer } : undefined,
+        },
+        product_name: r.product_name,
+        product_kod:  r.product_kod,
+        rank:         r.rank,
+      }))
+    }
+  }
+
+  // 2. Старая RPC search_chunks_ranked (fallback)
+  if (query.length >= 2) {
+    const ftsQuery = query
+      .trim()
+      .split(/\s+/)
+      .filter(w => w.length >= 2)
+      .map(w => w + ':*')
+      .join(' & ')
+
+    if (ftsQuery) {
+      const { data: rpcOld, error: rpcOldErr } = await supabase.rpc(
+        'search_chunks_ranked',
+        { search_query: ftsQuery, result_limit: limitChunks * 3 }
+      )
+      if (!rpcOldErr && rpcOld?.length) return (rpcOld as Record<string, unknown>[]).map(normalizeChunk)
+
+      // 3. FTS fallback
+      const { data: ftsData, error: ftsErr } = await supabase
+        .from('document_chunks')
+        .select(`
+          id, content, chunk_index, document_id,
+          doc_type, priority_weight, intent_tags, metadata,
+          documents(id, title, manufacturers(name_ru))
+        `)
+        .textSearch('content', ftsQuery, { type: 'websearch', config: 'russian' })
+        .limit(limitChunks * 3)
+
+      if (!ftsErr && ftsData?.length) return (ftsData as Record<string, unknown>[]).map(normalizeChunk)
+    }
+  }
+
+  // 4. ILIKE последний шанс
+  if (query.length >= 2) {
+    const { data: ilikeData } = await supabase
+      .from('document_chunks')
+      .select(`
+        id, content, chunk_index, document_id,
+        doc_type, priority_weight, intent_tags, metadata,
+        documents(id, title, manufacturers(name_ru))
+      `)
+      .ilike('content', `%${query}%`)
+      .limit(limitChunks * 3)
+
+    return ((ilikeData ?? []) as Record<string, unknown>[]).map(normalizeChunk)
+  }
+
+  return []
 }
 
-function deduplicateChunks(chunks: any[], limit: number): any[] {
-  const seenDocs = new Map<string, number>()
+// ─── дедупликация ─────────────────────────────────────────────
+function deduplicateChunks(chunks: ChunkRow[], limit: number): ChunkRow[] {
+  const seenDocs    = new Map<string, number>()
   const seenContent = new Set<string>()
-  const result: any[] = []
+  const result: ChunkRow[] = []
 
   for (const chunk of chunks) {
     if (result.length >= limit) break
@@ -113,25 +252,60 @@ function deduplicateChunks(chunks: any[], limit: number): any[] {
   return result
 }
 
-function buildContext(query: string, products: any[], rules: any[], notes: any[], chunks: any[]): string {
+// ─── формирование контекста для n8n ──────────────────────────
+function buildContext(
+  query: string,
+  products: any[],
+  rules: any[],
+  notes: any[],
+  chunks: ChunkRow[]
+): string {
   const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
 
+  // Чанки — с новыми полями приоритета и типа документа
   if (chunks.length) {
     lines.push('## Из технической документации (PDF)')
     for (const c of chunks) {
-      const doc = c.documents
-      const title = doc?.title || 'Документ'
-      const mfr = doc?.manufacturers?.name_ru
-      lines.push(`### ${title}${mfr ? ` (${mfr})` : ''}`)
+      const doc     = c.documents
+      const title   = doc?.title || c.doc_title || 'Документ'
+      const mfrRaw = c.documents?.manufacturers
+      const mfr = (Array.isArray(mfrRaw) ? mfrRaw[0] : mfrRaw)?.name_ru ?? c.manufacturer
+      const docType = c.doc_type ? `[${c.doc_type.toUpperCase()}]` : ''
+      const prio    = c.priority_weight ? ` приоритет ${c.priority_weight}/10` : ''
+      const prod    = c.product_name ? ` | ${c.product_name} (${c.product_kod})` : ''
+
+      lines.push(`### ${docType} ${title}${mfr ? ` (${mfr})` : ''}${prio}${prod}`)
+
+      // технические атрибуты из metadata
+      if (c.metadata) {
+        const m = c.metadata as Record<string, unknown>
+        const specs = [
+          m['coating']    ? `Покрытие: ${m['coating']}`          : '',
+          m['density']    ? `Плотность: ${m['density']} кг/м³`   : '',
+          m['thickness']  ? `Толщина: ${m['thickness']} мм`      : '',
+          m['temp_max']   ? `Темп. макс: ${m['temp_max']}°С`     : '',
+          m['gost']       ? `ГОСТ: ${m['gost']}`                 : '',
+        ].filter(Boolean).join(' | ')
+        if (specs) lines.push(`*${specs}*`)
+      }
+
       lines.push(makeSnippet(c.content, query))
       lines.push('')
     }
   }
 
+  // Продукты — теперь с kod_1c и плотностью
   if (products.length) {
-    lines.push('## Продукты')
+    lines.push('## Продукты в каталоге')
     for (const p of products) {
-      lines.push(`- **${p.name}** | ${p.flammability} | T до ${p.temp_max}°C | ДУ ${p.diameter_min}–${p.diameter_max}`)
+      const coating  = p.coating   ? ` | покрытие: ${p.coating}`     : ''
+      const density  = p.density   ? ` | ${p.density} кг/м³`         : ''
+      const thick    = p.thickness ? ` | толщина: ${p.thickness} мм` : ''
+      const stock    = p.in_stock  ? '' : ' | ⚠ нет в наличии'
+      lines.push(
+        `- **${p.name}** (${p.kod_1c ?? '—'}) | ${p.flammability} | T до ${p.temp_max}°C` +
+        `${coating}${density}${thick} | ДУ ${p.diameter_min}–${p.diameter_max}${stock}`
+      )
     }
     lines.push('')
   }
@@ -154,7 +328,16 @@ function buildContext(query: string, products: any[], rules: any[], notes: any[]
   return lines.join('\n')
 }
 
+// ─── утилиты (без изменений) ──────────────────────────────────
+function detectContext(query: string) {
+  const manufacturers = ['rockwool', 'isover', 'knauf', 'технониколь', 'paroc', 'ursa', 'экоролл']
+    .filter(m => query.toLowerCase().includes(m))
+  const du_values = (query.match(/\b(\d{2,3})\b/g) || []).map(Number)
+  return { manufacturers, du_values, keywords: [] }
+}
+
 function makeSnippet(text: string, query: string, ctx = 200): string {
+  if (!text) return ''
   const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2)
   let bestIdx = -1
   for (const w of words) {
@@ -163,6 +346,6 @@ function makeSnippet(text: string, query: string, ctx = 200): string {
   }
   if (bestIdx === -1) return text.slice(0, ctx * 2).trim() + '...'
   const start = Math.max(0, bestIdx - ctx)
-  const end = Math.min(text.length, bestIdx + ctx)
+  const end   = Math.min(text.length, bestIdx + ctx)
   return (start > 0 ? '...' : '') + text.slice(start, end).trim() + (end < text.length ? '...' : '')
 }

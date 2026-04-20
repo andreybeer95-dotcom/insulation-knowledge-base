@@ -2,15 +2,36 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import ProductSelect from "@/components/admin/ProductSelect";
 
 export const dynamic = "force-dynamic";
 
 export default function DocumentsPage() {
+  const DOC_TYPE_OPTIONS: Array<{ value: string; label: string; priority: number }> = [
+    { value: "tds", label: "Техлист / TDS", priority: 8 },
+    { value: "script", label: "Скрипт продаж", priority: 10 },
+    { value: "compare", label: "Сравнительная таблица", priority: 9 },
+    { value: "norm", label: "Норматив (ГОСТ, СП, ТУ)", priority: 7 },
+    { value: "install", label: "Инструкция по монтажу", priority: 6 },
+    { value: "price", label: "Прайс-лист", priority: 3 }
+  ];
+  const INTENT_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: "selection", label: "Подбор товара" },
+    { value: "objection", label: "Работа с возражением / конкурент" },
+    { value: "technical", label: "Технический вопрос" },
+    { value: "compliance", label: "Нормативное соответствие" },
+    { value: "install", label: "Монтаж" },
+    { value: "pricing", label: "Вопрос о цене" }
+  ];
+
   const [docs, setDocs] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<any[]>([]);
   const [title, setTitle] = useState("");
-  const [docType, setDocType] = useState("техлист");
+  const [docType, setDocType] = useState("tds");
+  const [priorityWeight, setPriorityWeight] = useState(8);
+  const [intentTags, setIntentTags] = useState<string[]>([]);
   const [manufacturerId, setManufacturerId] = useState<string>("");
+  const [productId, setProductId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const [uploadQueue, setUploadQueue] = useState<Array<{
@@ -59,6 +80,12 @@ export default function DocumentsPage() {
       try {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("title", title || file.name);
+        formData.append("doc_type", docType);
+        formData.append("priority_weight", String(priorityWeight));
+        formData.append("intent_tags", JSON.stringify(intentTags));
+        if (manufacturerId) formData.append("manufacturer_id", manufacturerId);
+        if (productId) formData.append("product_id", productId);
         console.log(`Отправляю файл ${i + 1}/${acceptedFiles.length}:`, file.name, file.size);
 
         const res = await fetch("/api/documents", {
@@ -106,7 +133,7 @@ export default function DocumentsPage() {
     setUploadStatus(`✅ ${ok} загружено  ⚠️ ${scan} сканов  ❌ ${err} ошибок`);
     
     await fetchDocuments();
-  }, [fetchDocuments]);
+  }, [fetchDocuments, title, docType, priorityWeight, intentTags, manufacturerId, productId]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -191,23 +218,35 @@ export default function DocumentsPage() {
   return (
     <div>
       <h1 className="mb-4 text-2xl font-bold">Документы</h1>
-      <div className="mb-3 grid grid-cols-3 gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-2">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Название документа (опционально)"
           className="rounded border p-2"
         />
-        <select value={docType} onChange={(e) => setDocType(e.target.value)} className="rounded border p-2">
-          <option value="техлист">техлист</option>
-          <option value="сертификат">сертификат</option>
-          <option value="прайс">прайс</option>
-          <option value="инструкция">инструкция</option>
-          <option value="дополнение">дополнение</option>
+        <select
+          value={docType}
+          onChange={(e) => {
+            const nextType = e.target.value;
+            setDocType(nextType);
+            const found = DOC_TYPE_OPTIONS.find((o) => o.value === nextType);
+            if (found) setPriorityWeight(found.priority);
+          }}
+          className="rounded border p-2"
+        >
+          {DOC_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
         </select>
         <select
           value={manufacturerId}
-          onChange={(e) => setManufacturerId(e.target.value)}
+          onChange={(e) => {
+            setManufacturerId(e.target.value);
+            setProductId(null);
+          }}
           className="rounded border p-2"
         >
           <option value="">Производитель (необязательно)</option>
@@ -217,6 +256,35 @@ export default function DocumentsPage() {
             </option>
           ))}
         </select>
+        <ProductSelect value={productId} onChange={setProductId} manufacturerId={manufacturerId} />
+        <input
+          value={priorityWeight}
+          onChange={(e) => setPriorityWeight(Number(e.target.value) || 0)}
+          type="number"
+          className="rounded border p-2"
+          placeholder="priority_weight"
+        />
+        <div className="rounded border p-2">
+          <p className="mb-2 text-sm font-medium">Intent tags</p>
+          <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
+            {INTENT_OPTIONS.map((option) => (
+              <label key={option.value} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={intentTags.includes(option.value)}
+                  onChange={(e) => {
+                    setIntentTags((prev) =>
+                      e.target.checked
+                        ? [...prev, option.value]
+                        : prev.filter((v) => v !== option.value)
+                    );
+                  }}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div

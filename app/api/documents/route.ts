@@ -27,7 +27,17 @@ export async function POST(request: NextRequest) {
     const file = formData.get("file") as File;
     const title = (formData.get("title") || formData.get("name") || "") as string;
     const manufacturer_id = formData.get("manufacturer_id") as string | null;
-    const doc_type = (formData.get("doc_type") || "дополнение") as string;
+    const product_id = formData.get("product_id") as string | null;
+    const doc_type = (formData.get("doc_type") || "tds") as string;
+    const priority_weight = Number(formData.get("priority_weight") || 0) || null;
+    const intent_tags_raw = (formData.get("intent_tags") || "[]") as string;
+    let intent_tags: string[] = [];
+    try {
+      const parsed = JSON.parse(intent_tags_raw);
+      if (Array.isArray(parsed)) intent_tags = parsed.filter((x) => typeof x === "string");
+    } catch {
+      intent_tags = [];
+    }
 
     if (!file) return NextResponse.json({ error: "Файл не передан" }, { status: 400 });
 
@@ -52,7 +62,10 @@ export async function POST(request: NextRequest) {
         file_name: fileName,
         file_url: urlData.publicUrl,
         manufacturer_id: manufacturer_id || null,
-        doc_type
+        product_id: product_id || null,
+        doc_type,
+        priority_weight,
+        intent_tags
       })
       .select("*, manufacturers(name_ru)")
       .single();
