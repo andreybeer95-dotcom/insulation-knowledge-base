@@ -14,14 +14,14 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabase
     .from("document_products")
-    .select("document_id, product_id, products(id, name, coating, flammability)")
+    .select("product_id, products(id, name, coating, density, kod_1c)")
     .eq("document_id", document_id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  return NextResponse.json({ items: data ?? [] });
+  return NextResponse.json({ linked_products: data ?? [] });
 }
 
 export async function POST(request: NextRequest) {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import ProductSelect from "@/components/admin/ProductSelect";
-import ProductLinker from "./ProductLinker";
+import ProductLinker from "@/components/admin/ProductLinker";
 
 export const dynamic = "force-dynamic";
 
