@@ -31,6 +31,13 @@ export async function extractTextWithOCR(pdfBuffer: Buffer): Promise<string> {
   }
 
   const data = await response.json() as any;
+  console.log('Vision API raw response:', JSON.stringify(data).slice(0, 500));
+  console.log('responses count:', data.responses?.length);
+  if (data.responses?.[0]) {
+    console.log('first response keys:', Object.keys(data.responses[0]));
+    console.log('error:', data.responses[0].error);
+    console.log('text length:', data.responses[0].fullTextAnnotation?.text?.length);
+  }
 
   const allText: string[] = [];
   const responses = data.responses ?? [];
