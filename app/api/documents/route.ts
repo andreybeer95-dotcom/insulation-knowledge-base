@@ -10,7 +10,9 @@ function detectDocType(fileName: string): string {
   if (name.includes("сертификат пожарн")) return "сертификат";
   if (name.includes("сертификат соответ")) return "сертификат";
   if (name.includes("декларация")) return "сертификат";
-  if (name.includes("свидетельство") || name.includes("сан")) return "сертификат";
+  if (name.includes("свидетельство") || name.includes("санпин") || name.includes("сан")) return "сертификат";
+  if (name.includes("отказное письмо")) return "сертификат";
+  if (name.includes("письмо мчс")) return "сертификат";
   if (name.includes("прайс") || name.includes("price")) return "прайс";
   if (name.includes("инструкц") || name.includes("монтаж")) return "инструкция";
   if (name.includes("каталог")) return "tds";
@@ -21,8 +23,8 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
   const name = fileName.toLowerCase();
   
   const brandKeywords: Record<string, string[]> = {
-    'Церезит': ['церезит', 'ceresit', 'см 11', 'см 14', 'см 16', 'ст 83', 'ст 180'],
-    'Плитонит': ['плитонит', 'plitонit'],
+    'Церезит': ['церезит', 'ceresit', 'см 11', 'см 14', 'см 16', 'ст 83', 'ст 180', 'cr 65', 'cr65', 'cr65'],
+    'Плитонит': ['плитонит', 'plitонit', 'plitosil', 'плитосил'],
     'Основит': ['основит', 'osnovit'],
     'Индастро': ['индастро', 'indastro', 'профскрин', 'rc45'],
     'Веккерле': ['веккерле', 'vekkerle', 'цпс', 'цемент м500'],
