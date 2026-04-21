@@ -379,43 +379,21 @@ async function searchChunks(
   // 4. ILIKE последний шанс
   if (query.length >= 2) {
     console.log('4️⃣ Trying ILIKE with query:', query);
-    // 4а. Поиск по содержимому чанков (OR по словам)
     const words = query.split(/\s+/).filter(w => w.length >= 2);
-    let contentQuery = supabase
-      .from('document_chunks')
-      .select(`
-        id, content, chunk_index, document_id,
-        doc_type, priority_weight, intent_tags, metadata,
-        documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
-      `)
-      .limit(limitChunks * 3)
-      .or(words.map(w => `content.ilike.%${w}%`).join(','));
-    if (manufacturer_id) {
-      contentQuery = contentQuery.eq('documents.manufacturer_id', manufacturer_id);
-    }
-    const { data: contentData } = await contentQuery;
 
-    // 4б. Поиск по названию документа — ищем точные фразы
-    // Формируем фразы: если есть пары "CT 83", "CM 11" и т.д.
+    // Формируем фразы артикулов (например "ct 83", "cm 11")
     const articlePhrases: string[] = [];
     for (let i = 0; i < words.length - 1; i++) {
       const w = words[i];
       const next = words[i + 1];
-      // Если слово выглядит как префикс артикула (2-3 буквы) + число
       if (/^[a-zа-яё]{2,3}$/i.test(w) && /^\d+/.test(next)) {
-        articlePhrases.push(`${w} ${next}`);  // "ct 83"
-        articlePhrases.push(`${w}${next}`);   // "ct83"
+        articlePhrases.push(`${w} ${next}`);
+        articlePhrases.push(`${w}${next}`);
       }
     }
 
-    // Также добавляем одиночные длинные слова (названия брендов)
-    const brandWords = words.filter(w => w.length >= 5);
-
-    const titleFilters = [...articlePhrases, ...brandWords]
-      .map(phrase => `title.ilike.%${phrase}%`);
-
-    let titleData: any[] = [];
-    if (titleFilters.length > 0) {
+    // 4а. Сначала ищем по названию документа (высший приоритет)
+    if (articlePhrases.length > 0) {
       let titleQuery = supabase
         .from('document_chunks')
         .select(`
@@ -423,27 +401,39 @@ async function searchChunks(
           doc_type, priority_weight, intent_tags, metadata,
           documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
         `)
-        .or(titleFilters.join(','))
+        .or(articlePhrases.map(p => `documents.title.ilike.%${p}%`).join(','))
         .limit(limitChunks * 2);
+
       if (manufacturer_id) {
         titleQuery = titleQuery.eq('documents.manufacturer_id', manufacturer_id);
       }
-      const { data } = await titleQuery;
-      titleData = data ?? [];
+
+      const { data: titleData } = await titleQuery;
+
+      if (titleData && titleData.length >= 3) {
+        console.log(`✅ Found ${titleData.length} chunks by title`);
+        return (titleData as Record<string, unknown>[]).map(normalizeChunk);
+      }
     }
 
-    // Объединяем результаты, убираем дубли по id
-    const combined = [...(contentData ?? []), ...(titleData ?? [])];
-    const seen = new Set<string>();
-    const ilikeData = combined.filter(r => {
-      const id = (r as any).id;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
+    // 4б. Fallback — поиск по содержимому
+    let ilikeQuery = supabase
+      .from('document_chunks')
+      .select(`
+        id, content, chunk_index, document_id,
+        doc_type, priority_weight, intent_tags, metadata,
+        documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
+      `)
+      .or(words.map(w => `content.ilike.%${w}%`).join(','))
+      .limit(limitChunks * 2);
 
-    console.log('✅ Found N chunks via ILIKE:', ilikeData?.length ?? 0);
-    return ((ilikeData ?? []) as Record<string, unknown>[]).map(normalizeChunk)
+    if (manufacturer_id) {
+      ilikeQuery = ilikeQuery.eq('documents.manufacturer_id', manufacturer_id);
+    }
+
+    const { data: ilikeData } = await ilikeQuery;
+    console.log('✅ Found N chunks via ILIKE (content):', ilikeData?.length ?? 0);
+    return ((ilikeData ?? []) as Record<string, unknown>[]).map(normalizeChunk);
   }
 
   return []
