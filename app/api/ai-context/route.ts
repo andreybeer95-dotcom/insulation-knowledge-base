@@ -57,7 +57,27 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
 
   // старые параметры (обратная совместимость)
-  const query       = searchParams.get('query') || searchParams.get('q') || ''
+  const rawQuery = searchParams.get('query') || searchParams.get('q') || ''
+
+  // Очищаем вопрос — убираем стоп-слова и оставляем ключевые термины
+  function extractKeywords(text: string): string {
+    const stopWords = [
+      'какие', 'какой', 'какая', 'что', 'где', 'как', 'есть', 'на', 'для',
+      'по', 'из', 'в', 'с', 'и', 'или', 'не', 'это', 'нам', 'нас', 'мне',
+      'продукцию', 'продукции', 'товару', 'материалу', 'подберите', 'найдите',
+      'покажите', 'скажите', 'расскажите', 'нужен', 'нужна', 'нужно'
+    ];
+    
+    const words = text.toLowerCase()
+      .replace(/[?!.,;:]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !stopWords.includes(w));
+    
+    return words.join(' ') || text;
+  }
+
+  const query = extractKeywords(rawQuery);
+  console.log('Original query:', rawQuery, '→ Keywords:', query);
   const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || searchParams.get('limit') || '5'), 10)
 
   // новые параметры
@@ -119,7 +139,8 @@ export async function GET(request: NextRequest) {
   const formattedContext = buildContext(query, products, rules, notes, chunks)
 
   return NextResponse.json({
-    query,
+    query: rawQuery,
+    query_keywords: query,
     filters: { product_id, category_id, intent_tags, doc_types: doc_types_arr },
     detected: detectContext(query),
     relevant_products: products,
