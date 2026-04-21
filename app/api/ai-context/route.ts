@@ -268,7 +268,7 @@ export async function GET(request: NextRequest) {
   })
 }
 
-// ─── поиск чанков: новая RPC → старая RPC → FTS → ILIKE ──────
+// ─── поиск чанков: title → RPC → старая RPC → FTS → ILIKE ─────
 async function searchChunks(
   supabase: ReturnType<typeof createClient>,
   opts: {
@@ -283,6 +283,58 @@ async function searchChunks(
 ): Promise<ChunkRow[]> {
   const { query, limitChunks, product_id, manufacturer_id, category_id, intent_tags, doc_types_arr } = opts
   console.log('🔍 searchChunks called with query:', JSON.stringify(query));
+
+  // ШАГ 0: Прямой поиск по названию документа (высший приоритет)
+  // Ищем точное совпадение артикула в названии документа
+  const rawWords = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+
+  // Строим фразы для поиска по title
+  const titleSearchPhrases: string[] = [];
+  for (let i = 0; i < rawWords.length - 1; i++) {
+    const w = rawWords[i];
+    const next = rawWords[i + 1];
+    // Артикул = короткое слово (2-3 буквы) + цифра
+    if (/^[a-zа-яё]{2,3}$/.test(w) && /^\d/.test(next)) {
+      titleSearchPhrases.push(`${w} ${next}`);  // "ct 83", "ст 83"
+    }
+  }
+
+  if (titleSearchPhrases.length > 0) {
+    const titleFilters = titleSearchPhrases
+      .map(p => `title.ilike.%${p}%`)
+      .join(',');
+
+    let step0Query = supabase
+      .from('documents')
+      .select('id')
+      .or(titleFilters);
+
+    if (manufacturer_id) {
+      step0Query = step0Query.eq('manufacturer_id', manufacturer_id);
+    }
+
+    const { data: matchedDocs } = await step0Query;
+
+    if (matchedDocs && matchedDocs.length > 0) {
+      const docIds = matchedDocs.map(d => d.id);
+      console.log(`0️⃣ Found docs by title: ${docIds.length}`, titleSearchPhrases);
+
+      const { data: step0Chunks } = await supabase
+        .from('document_chunks')
+        .select(`
+          id, content, chunk_index, document_id,
+          doc_type, priority_weight, intent_tags, metadata,
+          documents(id, title, manufacturers(name_ru))
+        `)
+        .in('document_id', docIds)
+        .limit(limitChunks * 2);
+
+      if (step0Chunks && step0Chunks.length >= 2) {
+        console.log(`✅ Step 0: returning ${step0Chunks.length} chunks from title match`);
+        return (step0Chunks as Record<string, unknown>[]).map(normalizeChunk);
+      }
+    }
+  }
 
   // 1. Новая RPC get_ai_context (приоритет + фильтры)
   if (query.length >= 2) {
