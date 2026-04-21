@@ -92,6 +92,14 @@ export async function GET(request: NextRequest) {
       'cutwool': 'катвул',
       'катвул': 'cutwool',
       'isotec': 'изотек',
+      'ст': 'ct',
+      'ct': 'ст',
+      'см': 'cm',
+      'cm': 'см',
+      'сх': 'cx',
+      'cx': 'сх',
+      'сл': 'cl',
+      'cl': 'сл',
     };
 
     const extra: string[] = [];
@@ -101,7 +109,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return [...words, ...extra].join(' ');
+    // Транслитерация для артикулов типа "СТ 83" → "CT 83"
+    const result = [...words, ...extra];
+    const translitMap: Record<string, string> = {
+      'ст': 'ct', 'ct': 'ст',
+      'см': 'cm', 'cm': 'см',
+      'сх': 'cx', 'cx': 'сх',
+      'сл': 'cl', 'cl': 'сл',
+    };
+    for (let i = 0; i < words.length - 1; i++) {
+      const w = words[i];
+      const next = words[i + 1];
+      if (translitMap[w] && /^\d+/.test(next)) {
+        // Нашли артикул типа "СТ 83" — добавляем "CT 83"
+        result.push(translitMap[w], next);
+      }
+    }
+
+    return result.join(' ');
   }
 
   const query = extractKeywords(rawQuery);
