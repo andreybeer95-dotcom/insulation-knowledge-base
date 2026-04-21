@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import crypto from "crypto";
 
 export const maxDuration = 60;
 
@@ -55,6 +56,26 @@ export async function POST(request: NextRequest) {
     const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    const fileHash = crypto.createHash("md5").update(buffer).digest("hex");
+
+    const { data: existing } = await supabase
+      .from("documents")
+      .select("id, title")
+      .eq("file_hash", fileHash)
+      .single();
+
+    if (existing) {
+      return NextResponse.json(
+        {
+          success: false,
+          duplicate: true,
+          existing_id: existing.id,
+          existing_title: existing.title,
+          warning: `Файл уже загружен как "${existing.title}"`
+        },
+        { status: 409 }
+      );
+    }
 
     const { error: storageError } = await supabase.storage
       .from("documents")
@@ -74,6 +95,7 @@ export async function POST(request: NextRequest) {
         file_url: urlData.publicUrl,
         manufacturer_id: manufacturer_id || null,
         product_id: product_id || null,
+        file_hash: fileHash,
         doc_type: doc_type_ru,
         priority_weight,
         intent_tags

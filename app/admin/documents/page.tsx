@@ -95,14 +95,24 @@ export default function DocumentsPage() {
         const responseText = await res.text();
         console.log(`Ответ для ${file.name}:`, res.status, responseText.slice(0, 200));
 
-        if (!res.ok) {
-          throw new Error(`Сервер вернул ${res.status}: ${responseText.slice(0, 150)}`);
-        }
-
         let data: any = null;
         try {
           data = JSON.parse(responseText);
         } catch {
+          data = null;
+        }
+
+        if (res.status === 409) {
+          queue[i].status = "error";
+          queue[i].error = data?.warning ?? "Файл уже загружен";
+          continue;
+        }
+
+        if (!res.ok) {
+          throw new Error(`Сервер вернул ${res.status}: ${responseText.slice(0, 150)}`);
+        }
+
+        if (!data) {
           throw new Error(`Невалидный JSON от сервера: ${responseText.slice(0, 100)}`);
         }
 
