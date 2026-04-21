@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import ProductSelect from "@/components/admin/ProductSelect";
+import ProductLinker from "./ProductLinker";
 
 export const dynamic = "force-dynamic";
 
@@ -335,6 +336,9 @@ export default function DocumentsPage() {
           ))}
         </ul>
       )}
+      {uploadQueue.length > 0 && (
+        <p className="mb-3 text-sm text-slate-600">После загрузки привяжи документы к продуктам в списке ниже</p>
+      )}
       {busy && <p className="mb-3 text-sm text-slate-600">Загрузка/обработка...</p>}
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
@@ -348,6 +352,7 @@ export default function DocumentsPage() {
             <th className="p-2">Страниц</th>
             <th className="p-2">Файл</th>
             <th className="p-2">Статус</th>
+            <th className="p-2">Продукты</th>
             <th className="p-2">Создан</th>
             <th className="p-2">Действия</th>
           </tr>
@@ -387,6 +392,9 @@ export default function DocumentsPage() {
                   </div>
                 )}
               </td>
+              <td className="p-2">
+                <ProductLinker documentId={d.id} manufacturerId={d.manufacturer_id} />
+              </td>
               <td className="p-2 text-center">{new Date(d.created_at).toLocaleDateString()}</td>
               <td className="p-2 text-center">
                 {status.type === "none" && (
@@ -409,7 +417,7 @@ export default function DocumentsPage() {
             </tr>
             {manualTextDocId === d.id && (
               <tr className="border-b bg-slate-50">
-                <td className="p-2" colSpan={9}>
+                <td className="p-2" colSpan={10}>
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Вставьте текст из скана</p>
                     <textarea
@@ -447,7 +455,7 @@ export default function DocumentsPage() {
           })}
           {docs.length === 0 && (
             <tr>
-              <td className="p-4 text-center text-slate-500" colSpan={9}>
+              <td className="p-4 text-center text-slate-500" colSpan={10}>
                 Документов пока нет
               </td>
             </tr>
