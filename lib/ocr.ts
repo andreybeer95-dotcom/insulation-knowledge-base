@@ -40,15 +40,22 @@ export async function extractTextWithOCR(pdfBuffer: Buffer): Promise<string> {
   }
 
   const allText: string[] = [];
-  const responses = data.responses ?? [];
+  // files:annotate возвращает вложенную структуру:
+  // data.responses[0].responses[n].fullTextAnnotation
+  const outerResponses = data.responses ?? [];
 
-  for (const pageResponse of responses) {
-    if (pageResponse.error) {
-      console.error("Vision page error:", pageResponse.error);
-      continue;
+  for (const outer of outerResponses) {
+    // Внутренний массив страниц
+    const innerResponses = outer.responses ?? [];
+    for (const pageResponse of innerResponses) {
+      if (pageResponse.error) {
+        console.error("Vision page error:", pageResponse.error);
+        continue;
+      }
+      const text = pageResponse.fullTextAnnotation?.text ?? "";
+      console.log(`Page text length: ${text.length}`);
+      if (text.trim()) allText.push(text.trim());
     }
-    const text = pageResponse.fullTextAnnotation?.text ?? "";
-    if (text.trim()) allText.push(text.trim());
   }
 
   return allText.join("\n\n--- Страница ---\n\n");
