@@ -61,50 +61,47 @@ export async function GET(request: NextRequest) {
 
   // Очищаем вопрос — убираем стоп-слова и оставляем ключевые термины
   function extractKeywords(text: string): string {
-    const brandMap: Record<string, string> = {
-      'см 11': 'клей цементный смесь',
-      'см 14': 'клей цементный смесь',
-      'см 16': 'клей цементный смесь',
-      'ст 83': 'ceresit штукатурно-клеевая смесь фасад',
-      'ct 83': 'ceresit штукатурно-клеевая смесь фасад',
-      'ст 180': 'ceresit клей фасад',
-      'ct 180': 'ceresit клей фасад',
-      'ст 85': 'ceresit клей фасад',
-      'ct 85': 'ceresit клей фасад',
-      'церезит': 'ceresit клей смесь',
-      'плитонит': 'клей смесь плитка',
-      'основит': 'клей штукатурка смесь',
-      'кв-80': 'цилиндр теплоизоляция',
-      'кв-100': 'цилиндр теплоизоляция',
-      'bos-pipe': 'цилиндр теплоизоляция',
-      'xotpipe': 'цилиндр теплоизоляция xotpipe',
+    const stopWords = new Set([
+      'какие', 'какой', 'какая', 'что', 'где', 'как', 'есть', 'на', 'для',
+      'по', 'из', 'в', 'с', 'и', 'или', 'не', 'это', 'нам', 'нас', 'мне', 'продукцию',
+      'продукции', 'подберите', 'найдите', 'покажите', 'скажите',
+      'расскажите', 'расскажи', 'нужен', 'нужна', 'нужно',
+      'про', 'об', 'при', 'все', 'был', 'есть', 'тот', 'эта',
+    ]);
+
+    // Убираем знаки препинания, приводим к нижнему регистру
+    const words = text.toLowerCase()
+      .replace(/[?!.,;:]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !stopWords.has(w));
+
+    // Добавляем расширения для брендов (НЕ заменяем оригинал)
+    const brandExpansions: Record<string, string> = {
+      'церезит': 'ceresit',
+      'ceresit': 'церезит',
+      'плитонит': 'plitonit',
+      'plitonit': 'плитонит',
+      'plitosil': 'плитосил',
+      'основит': 'osnovit',
+      'xotpipe': 'хотпайп',
+      'хотпайп': 'xotpipe',
+      'экоролл': 'ekoroll',
+      'ekoroll': 'экоролл',
+      'rockwool': 'роквул',
+      'роквул': 'rockwool',
+      'cutwool': 'катвул',
+      'катвул': 'cutwool',
+      'isotec': 'изотек',
     };
 
-    // Применяем маппинг
-    let expandedText = text.toLowerCase();
-    for (const [brand, expansion] of Object.entries(brandMap)) {
-      if (expandedText.includes(brand)) {
-        expandedText = expandedText + ' ' + expansion;
+    const extra: string[] = [];
+    for (const word of words) {
+      if (brandExpansions[word]) {
+        extra.push(brandExpansions[word]);
       }
     }
 
-    const stopWords = [
-      'какие', 'какой', 'какая', 'что', 'где', 'как', 'есть', 'на', 'для',
-      'по', 'из', 'в', 'с', 'и', 'или', 'не', 'это', 'нам', 'нас', 'мне',
-      'продукцию', 'продукции', 'товару', 'материалу', 'подберите', 'найдите',
-      'покажите', 'скажите', 'расскажите', 'нужен', 'нужна', 'нужно',
-      'расскажи', 'про', 'об', 'от', 'до', 'при', 'со', 'за', 'под',
-      'про', 'это', 'тот', 'эта', 'все', 'был', 'что', 'как',
-    ];
-    
-    // Затем применяем существующую логику extractKeywords к expandedText
-    // вместо text
-    const words = expandedText
-      .replace(/[?!.,;:]/g, '')
-      .split(/\s+/)
-      .filter(w => w.length >= 2 && !stopWords.includes(w));
-    
-    return words.join(' ') || text;
+    return [...words, ...extra].join(' ');
   }
 
   const query = extractKeywords(rawQuery);
