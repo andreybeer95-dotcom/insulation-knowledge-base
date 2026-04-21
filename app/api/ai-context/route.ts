@@ -61,6 +61,29 @@ export async function GET(request: NextRequest) {
 
   // Очищаем вопрос — убираем стоп-слова и оставляем ключевые термины
   function extractKeywords(text: string): string {
+    const brandMap: Record<string, string> = {
+      'см 11': 'клей цементный смесь',
+      'см 14': 'клей цементный смесь',
+      'см 16': 'клей цементный смесь',
+      'ст 83': 'клей цементный смесь',
+      'ст 180': 'клей цементный смесь',
+      'церезит': 'ceresit клей смесь',
+      'плитонит': 'клей смесь плитка',
+      'основит': 'клей штукатурка смесь',
+      'кв-80': 'цилиндр теплоизоляция',
+      'кв-100': 'цилиндр теплоизоляция',
+      'bos-pipe': 'цилиндр теплоизоляция',
+      'xotpipe': 'цилиндр теплоизоляция xotpipe',
+    };
+
+    // Применяем маппинг
+    let expandedText = text.toLowerCase();
+    for (const [brand, expansion] of Object.entries(brandMap)) {
+      if (expandedText.includes(brand)) {
+        expandedText = expandedText + ' ' + expansion;
+      }
+    }
+
     const stopWords = [
       'какие', 'какой', 'какая', 'что', 'где', 'как', 'есть', 'на', 'для',
       'по', 'из', 'в', 'с', 'и', 'или', 'не', 'это', 'нам', 'нас', 'мне',
@@ -68,7 +91,9 @@ export async function GET(request: NextRequest) {
       'покажите', 'скажите', 'расскажите', 'нужен', 'нужна', 'нужно'
     ];
     
-    const words = text.toLowerCase()
+    // Затем применяем существующую логику extractKeywords к expandedText
+    // вместо text
+    const words = expandedText
       .replace(/[?!.,;:]/g, '')
       .split(/\s+/)
       .filter(w => w.length > 2 && !stopWords.includes(w));
