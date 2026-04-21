@@ -29,6 +29,17 @@ export async function POST(request: NextRequest) {
     const manufacturer_id = formData.get("manufacturer_id") as string | null;
     const product_id = formData.get("product_id") as string | null;
     const doc_type = (formData.get("doc_type") || "tds") as string;
+    const DOC_TYPE_MAP: Record<string, string> = {
+      tds: "техлист",
+      script: "инструкция",
+      compare: "техлист",
+      norm: "техлист",
+      install: "инструкция",
+      price: "прайс",
+      certificate: "сертификат",
+      addition: "дополнение",
+    };
+    const doc_type_ru = DOC_TYPE_MAP[doc_type] ?? "техлист";
     const priority_weight = Number(formData.get("priority_weight") || 0) || null;
     const intent_tags_raw = (formData.get("intent_tags") || "[]") as string;
     let intent_tags: string[] = [];
@@ -63,7 +74,7 @@ export async function POST(request: NextRequest) {
         file_url: urlData.publicUrl,
         manufacturer_id: manufacturer_id || null,
         product_id: product_id || null,
-        doc_type,
+        doc_type: doc_type_ru,
         priority_weight,
         intent_tags
       })
