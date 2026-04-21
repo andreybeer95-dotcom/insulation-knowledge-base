@@ -267,25 +267,84 @@ async function searchChunks(
 
     if (!rpcNewErr && rpcNew?.length) {
       console.log('✅ Found N chunks via get_ai_context:', rpcNew.length);
-      // нормализуем поля RPC к формату ChunkRow
-      return (rpcNew as ChunkRow[]).map(r => ({
-        id:              r.chunk_id ?? r.id,
-        content:         r.chunk_content ?? r.content,
-        chunk_index:     0,
-        document_id:     '',
-        doc_type:        r.doc_type,
-        priority_weight: r.priority_weight,
-        intent_tags:     r.intent_tags,
-        metadata:        r.metadata,
-        documents: {
-          id:            '',
-          title:         r.doc_title ?? '',
-          manufacturers: r.manufacturer ? { name_ru: r.manufacturer } : undefined,
-        },
-        product_name: r.product_name,
-        product_kod:  r.product_kod,
-        rank:         r.rank,
-      }))
+
+      // Проверяем соответствие производителя
+      const queryLower = query.toLowerCase();
+      const manufacturerKeywords: Record<string, string[]> = {
+        'церезит': ['Церезит', 'Ceresit'],
+        'ceresit': ['Церезит', 'Ceresit'],
+        'плитонит': ['Плитонит'],
+        'plitonit': ['Плитонит'],
+        'основит': ['Основит'],
+        'xotpipe': ['XOTPIPE'],
+        'хотпайп': ['XOTPIPE'],
+        'экоролл': ['ЭКОРОЛЛ'],
+        'rockwool': ['ROCKWOOL'],
+        'роквул': ['ROCKWOOL'],
+        'isotec': ['ISOTEC'],
+        'cutwool': ['CUTWOOL'],
+      };
+
+      // Определяем ожидаемого производителя из запроса
+      let expectedManufacturer: string | null = null;
+      for (const [kw, names] of Object.entries(manufacturerKeywords)) {
+        if (queryLower.includes(kw)) {
+          expectedManufacturer = names[0];
+          break;
+        }
+      }
+
+      // Если ожидаем конкретного производителя — проверяем есть ли он в результатах
+      if (expectedManufacturer) {
+        const hasExpected = (rpcNew as any[]).some(r =>
+          r.manufacturer === expectedManufacturer ||
+          r.doc_title?.includes(expectedManufacturer)
+        );
+        if (!hasExpected) {
+          console.log(`⚠️ RPC вернул не того производителя, пропускаем. Ожидали: ${expectedManufacturer}`);
+          // Не возвращаем результаты RPC — идём дальше
+        } else {
+          // нормализуем поля RPC к формату ChunkRow
+          return (rpcNew as ChunkRow[]).map(r => ({
+            id:              r.chunk_id ?? r.id,
+            content:         r.chunk_content ?? r.content,
+            chunk_index:     0,
+            document_id:     '',
+            doc_type:        r.doc_type,
+            priority_weight: r.priority_weight,
+            intent_tags:     r.intent_tags,
+            metadata:        r.metadata,
+            documents: {
+              id:            '',
+              title:         r.doc_title ?? '',
+              manufacturers: r.manufacturer ? { name_ru: r.manufacturer } : undefined,
+            },
+            product_name: r.product_name,
+            product_kod:  r.product_kod,
+            rank:         r.rank,
+          }))
+        }
+      } else {
+        // нормализуем поля RPC к формату ChunkRow
+        return (rpcNew as ChunkRow[]).map(r => ({
+          id:              r.chunk_id ?? r.id,
+          content:         r.chunk_content ?? r.content,
+          chunk_index:     0,
+          document_id:     '',
+          doc_type:        r.doc_type,
+          priority_weight: r.priority_weight,
+          intent_tags:     r.intent_tags,
+          metadata:        r.metadata,
+          documents: {
+            id:            '',
+            title:         r.doc_title ?? '',
+            manufacturers: r.manufacturer ? { name_ru: r.manufacturer } : undefined,
+          },
+          product_name: r.product_name,
+          product_kod:  r.product_kod,
+          rank:         r.rank,
+        }))
+      }
     }
   }
 
