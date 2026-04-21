@@ -343,16 +343,38 @@ async function searchChunks(
       .limit(limitChunks * 3)
       .or(words.map(w => `content.ilike.%${w}%`).join(','));
 
-    // 4б. Поиск по названию документа
-    const { data: titleData } = await supabase
-      .from('document_chunks')
-      .select(`
-        id, content, chunk_index, document_id,
-        doc_type, priority_weight, intent_tags, metadata,
-        documents!inner(id, title, manufacturers(name_ru))
-      `)
-      .or(words.map(w => `documents.title.ilike.%${w}%`).join(','))
-      .limit(limitChunks * 2);
+    // 4б. Поиск по названию документа — ищем точные фразы
+    // Формируем фразы: если есть пары "CT 83", "CM 11" и т.д.
+    const articlePhrases: string[] = [];
+    for (let i = 0; i < words.length - 1; i++) {
+      const w = words[i];
+      const next = words[i + 1];
+      // Если слово выглядит как префикс артикула (2-3 буквы) + число
+      if (/^[a-zа-яё]{2,3}$/i.test(w) && /^\d+/.test(next)) {
+        articlePhrases.push(`${w} ${next}`);  // "ct 83"
+        articlePhrases.push(`${w}${next}`);   // "ct83"
+      }
+    }
+
+    // Также добавляем одиночные длинные слова (названия брендов)
+    const brandWords = words.filter(w => w.length >= 5);
+
+    const titleFilters = [...articlePhrases, ...brandWords]
+      .map(phrase => `title.ilike.%${phrase}%`);
+
+    let titleData: any[] = [];
+    if (titleFilters.length > 0) {
+      const { data } = await supabase
+        .from('document_chunks')
+        .select(`
+          id, content, chunk_index, document_id,
+          doc_type, priority_weight, intent_tags, metadata,
+          documents!inner(id, title, manufacturers(name_ru))
+        `)
+        .or(titleFilters.join(','))
+        .limit(limitChunks * 2);
+      titleData = data ?? [];
+    }
 
     // Объединяем результаты, убираем дубли по id
     const combined = [...(contentData ?? []), ...(titleData ?? [])];
