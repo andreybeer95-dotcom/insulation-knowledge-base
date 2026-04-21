@@ -17,6 +17,35 @@ function detectDocType(fileName: string): string {
   return "tds"; // по умолчанию
 }
 
+async function detectManufacturer(fileName: string, supabase: any): Promise<string | null> {
+  const name = fileName.toLowerCase();
+  
+  const brandKeywords: Record<string, string[]> = {
+    'Церезит': ['церезит', 'ceresit', 'см 11', 'см 14', 'см 16', 'ст 83', 'ст 180'],
+    'Плитонит': ['плитонит', 'plitонit'],
+    'Основит': ['основит', 'osnovit'],
+    'Индастро': ['индастро', 'indastro', 'профскрин', 'rc45'],
+    'Веккерле': ['веккерле', 'vekkerle', 'цпс', 'цемент м500'],
+    'ЭКОРОЛЛ': ['экоролл', 'ekoroll', 'кв-', 'кв80', 'кв100'],
+    'XOTPIPE': ['xotpipe', 'хотпайп', 'bos-pipe', 'bos pipe'],
+    'ROCKWOOL': ['rockwool', 'роквул', 'rwl', 'sp alu'],
+    'CUTWOOL': ['cutwool', 'катвул'],
+    'ISOTEC': ['isotec', 'изотек', 'shell', 'section al'],
+  };
+  
+  for (const [brandName, keywords] of Object.entries(brandKeywords)) {
+    if (keywords.some(kw => name.includes(kw))) {
+      const { data } = await supabase
+        .from('manufacturers')
+        .select('id')
+        .ilike('name_ru', brandName)
+        .single();
+      if (data) return data.id;
+    }
+  }
+  return null;
+}
+
 export async function GET() {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -40,7 +69,13 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file") as File;
     const title = (formData.get("title") || formData.get("name") || "") as string;
-    const manufacturer_id = formData.get("manufacturer_id") as string | null;
+    let manufacturer_id = formData.get("manufacturer_id") as string | null || null;
+    if (!manufacturer_id) {
+      manufacturer_id = await detectManufacturer(file.name, supabase);
+      if (manufacturer_id) {
+        console.log(`🏭 Автоопределён производитель для: ${file.name}`);
+      }
+    }
     const product_id = formData.get("product_id") as string | null;
     const doc_type_raw = formData.get("doc_type") as string || '';
     const fileName_orig = file.name;
