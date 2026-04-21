@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
   }
 
   const query = extractKeywords(rawQuery);
+  const searchQuery = query.length >= 2 ? query : rawQuery;
   console.log('Original query:', rawQuery, '→ Keywords:', query);
   const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || searchParams.get('limit') || '5'), 10)
 
@@ -146,7 +147,7 @@ export async function GET(request: NextRequest) {
 
     // чанки — пробуем новую RPC сначала, fallback на старую логику
     searchChunks(supabase, {
-      query,
+      query: searchQuery,
       limitChunks,
       product_id,
       category_id,
@@ -222,9 +223,11 @@ async function searchChunks(
   }
 ): Promise<ChunkRow[]> {
   const { query, limitChunks, product_id, category_id, intent_tags, doc_types_arr } = opts
+  console.log('🔍 searchChunks called with query:', JSON.stringify(query));
 
   // 1. Новая RPC get_ai_context (приоритет + фильтры)
   if (query.length >= 2) {
+    console.log('1️⃣ Trying get_ai_context RPC...');
     const { data: rpcNew, error: rpcNewErr } = await supabase.rpc('get_ai_context', {
       p_query:       query,
       p_product_id:  product_id,
@@ -235,6 +238,7 @@ async function searchChunks(
     })
 
     if (!rpcNewErr && rpcNew?.length) {
+      console.log('✅ Found N chunks via get_ai_context:', rpcNew.length);
       // нормализуем поля RPC к формату ChunkRow
       return (rpcNew as ChunkRow[]).map(r => ({
         id:              r.chunk_id ?? r.id,
@@ -267,13 +271,18 @@ async function searchChunks(
       .join(' & ')
 
     if (ftsQuery) {
+      console.log('2️⃣ Trying search_chunks_ranked, ftsQuery:', ftsQuery);
       const { data: rpcOld, error: rpcOldErr } = await supabase.rpc(
         'search_chunks_ranked',
         { search_query: ftsQuery, result_limit: limitChunks * 3 }
       )
-      if (!rpcOldErr && rpcOld?.length) return (rpcOld as Record<string, unknown>[]).map(normalizeChunk)
+      if (!rpcOldErr && rpcOld?.length) {
+        console.log('✅ Found N chunks via search_chunks_ranked:', rpcOld.length);
+        return (rpcOld as Record<string, unknown>[]).map(normalizeChunk)
+      }
 
       // 3. FTS fallback
+      console.log('3️⃣ Trying FTS textSearch...');
       const { data: ftsData, error: ftsErr } = await supabase
         .from('document_chunks')
         .select(`
@@ -284,22 +293,34 @@ async function searchChunks(
         .textSearch('content', ftsQuery, { type: 'websearch', config: 'russian' })
         .limit(limitChunks * 3)
 
-      if (!ftsErr && ftsData?.length) return (ftsData as Record<string, unknown>[]).map(normalizeChunk)
+      if (!ftsErr && ftsData?.length) {
+        console.log('✅ Found N chunks via FTS textSearch:', ftsData.length);
+        return (ftsData as Record<string, unknown>[]).map(normalizeChunk)
+      }
     }
   }
 
   // 4. ILIKE последний шанс
   if (query.length >= 2) {
-    const { data: ilikeData } = await supabase
+    console.log('4️⃣ Trying ILIKE with query:', query);
+    const words = query.split(/\s+/).filter(w => w.length >= 3);
+    let ilikeQuery = supabase
       .from('document_chunks')
       .select(`
         id, content, chunk_index, document_id,
         doc_type, priority_weight, intent_tags, metadata,
         documents(id, title, manufacturers(name_ru))
       `)
-      .ilike('content', `%${query}%`)
       .limit(limitChunks * 3)
 
+    // Добавляем OR условия для каждого слова
+    if (words.length > 0) {
+      ilikeQuery = ilikeQuery.or(
+        words.map(w => `content.ilike.%${w}%`).join(',')
+      );
+    }
+    const { data: ilikeData } = await ilikeQuery;
+    console.log('✅ Found N chunks via ILIKE:', ilikeData?.length ?? 0);
     return ((ilikeData ?? []) as Record<string, unknown>[]).map(normalizeChunk)
   }
 
