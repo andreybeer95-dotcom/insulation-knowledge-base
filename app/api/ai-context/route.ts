@@ -134,6 +134,35 @@ export async function GET(request: NextRequest) {
   console.log('Original query:', rawQuery, '→ Keywords:', query);
   const limitChunks = Math.min(parseInt(searchParams.get('limit_chunks') || searchParams.get('limit') || '5'), 10)
 
+  // Определяем производителя из запроса
+  const queryLowerRaw = rawQuery.toLowerCase();
+  const manufacturerMap: Record<string, string> = {
+    'церезит': '80a19db2-d3ea-4b84-84b5-3369e7633a6e',
+    'ceresit': '80a19db2-d3ea-4b84-84b5-3369e7633a6e',
+    'плитонит': '092488a5-6935-422f-812c-089d8272a283',
+    'plitonit': '092488a5-6935-422f-812c-089d8272a283',
+    'plitosil': '092488a5-6935-422f-812c-089d8272a283',
+    'основит': '059697ca-bb21-46ed-aa4b-ef2756a06f53',
+    'индастро': 'd53cdc78-f96d-48e2-9060-e737bb3dd18e',
+    'веккерле': 'c60125cf-749b-43e5-95b3-ceae150065e5',
+    'xotpipe': '1b4a5543-7101-46cd-9a85-9866dd1132a9',
+    'хотпайп': '1b4a5543-7101-46cd-9a85-9866dd1132a9',
+    'экоролл': '4deb56f0-b7c9-46e9-8279-9fc4397419dd',
+    'ekoroll': '4deb56f0-b7c9-46e9-8279-9fc4397419dd',
+    'rockwool': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'роквул': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
+    'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
+  };
+
+  let detectedManufacturerId: string | null = null;
+  for (const [kw, id] of Object.entries(manufacturerMap)) {
+    if (queryLowerRaw.includes(kw)) {
+      detectedManufacturerId = id;
+      break;
+    }
+  }
+
   // новые параметры
   const product_id  = searchParams.get('product_id')  || null
   const category_id = searchParams.get('category_id') || null
@@ -178,6 +207,7 @@ export async function GET(request: NextRequest) {
       query: searchQuery,
       limitChunks,
       product_id,
+      manufacturer_id: detectedManufacturerId,
       category_id,
       intent_tags,
       doc_types_arr,
@@ -245,12 +275,13 @@ async function searchChunks(
     query:        string
     limitChunks:  number
     product_id:   string | null
+    manufacturer_id: string | null
     category_id:  string | null
     intent_tags:  string[] | null
     doc_types_arr: string[] | null
   }
 ): Promise<ChunkRow[]> {
-  const { query, limitChunks, product_id, category_id, intent_tags, doc_types_arr } = opts
+  const { query, limitChunks, product_id, manufacturer_id, category_id, intent_tags, doc_types_arr } = opts
   console.log('🔍 searchChunks called with query:', JSON.stringify(query));
 
   // 1. Новая RPC get_ai_context (приоритет + фильтры)
@@ -259,6 +290,7 @@ async function searchChunks(
     const { data: rpcNew, error: rpcNewErr } = await supabase.rpc('get_ai_context', {
       p_query:       query,
       p_product_id:  product_id,
+      p_manufacturer_id: manufacturer_id,
       p_category_id: category_id,
       p_doc_types:   doc_types_arr,
       p_intent_tags: intent_tags,
@@ -268,65 +300,8 @@ async function searchChunks(
     if (!rpcNewErr && rpcNew?.length) {
       console.log('✅ Found N chunks via get_ai_context:', rpcNew.length);
 
-      // Проверяем соответствие производителя
-      const queryLower = query.toLowerCase();
-      const manufacturerKeywords: Record<string, string[]> = {
-        'церезит': ['Церезит', 'Ceresit'],
-        'ceresit': ['Церезит', 'Ceresit'],
-        'плитонит': ['Плитонит'],
-        'plitonit': ['Плитонит'],
-        'основит': ['Основит'],
-        'xotpipe': ['XOTPIPE'],
-        'хотпайп': ['XOTPIPE'],
-        'экоролл': ['ЭКОРОЛЛ'],
-        'rockwool': ['ROCKWOOL'],
-        'роквул': ['ROCKWOOL'],
-        'isotec': ['ISOTEC'],
-        'cutwool': ['CUTWOOL'],
-      };
-
-      // Определяем ожидаемого производителя из запроса
-      let expectedManufacturer: string | null = null;
-      for (const [kw, names] of Object.entries(manufacturerKeywords)) {
-        if (queryLower.includes(kw)) {
-          expectedManufacturer = names[0];
-          break;
-        }
-      }
-
-      // Если ожидаем конкретного производителя — проверяем есть ли он в результатах
-      if (expectedManufacturer) {
-        const hasExpected = (rpcNew as any[]).some(r =>
-          r.manufacturer === expectedManufacturer ||
-          r.doc_title?.includes(expectedManufacturer)
-        );
-        if (!hasExpected) {
-          console.log(`⚠️ RPC вернул не того производителя, пропускаем. Ожидали: ${expectedManufacturer}`);
-          // Не возвращаем результаты RPC — идём дальше
-        } else {
-          // нормализуем поля RPC к формату ChunkRow
-          return (rpcNew as ChunkRow[]).map(r => ({
-            id:              r.chunk_id ?? r.id,
-            content:         r.chunk_content ?? r.content,
-            chunk_index:     0,
-            document_id:     '',
-            doc_type:        r.doc_type,
-            priority_weight: r.priority_weight,
-            intent_tags:     r.intent_tags,
-            metadata:        r.metadata,
-            documents: {
-              id:            '',
-              title:         r.doc_title ?? '',
-              manufacturers: r.manufacturer ? { name_ru: r.manufacturer } : undefined,
-            },
-            product_name: r.product_name,
-            product_kod:  r.product_kod,
-            rank:         r.rank,
-          }))
-        }
-      } else {
-        // нормализуем поля RPC к формату ChunkRow
-        return (rpcNew as ChunkRow[]).map(r => ({
+      const mapRpcRows = (rows: ChunkRow[]) =>
+        rows.map(r => ({
           id:              r.chunk_id ?? r.id,
           content:         r.chunk_content ?? r.content,
           chunk_index:     0,
@@ -343,7 +318,21 @@ async function searchChunks(
           product_name: r.product_name,
           product_kod:  r.product_kod,
           rank:         r.rank,
-        }))
+        }));
+
+      // Если RPC не поддерживает фильтрацию производителя, фильтруем результаты здесь
+      if (manufacturer_id && rpcNew?.length) {
+        const filtered = (rpcNew as any[]).filter(r =>
+          r.manufacturer_id === manufacturer_id ||
+          r.document_manufacturer_id === manufacturer_id
+        );
+        if (filtered.length > 0) {
+          return mapRpcRows(filtered as ChunkRow[]);
+        }
+        // Если после фильтрации пусто — идём дальше по fallback
+        console.log(`⚠️ RPC не вернул нужного производителя (${manufacturer_id}), fallback...`);
+      } else {
+        return mapRpcRows(rpcNew as ChunkRow[]);
       }
     }
   }
@@ -392,15 +381,19 @@ async function searchChunks(
     console.log('4️⃣ Trying ILIKE with query:', query);
     // 4а. Поиск по содержимому чанков (OR по словам)
     const words = query.split(/\s+/).filter(w => w.length >= 2);
-    const { data: contentData } = await supabase
+    let contentQuery = supabase
       .from('document_chunks')
       .select(`
         id, content, chunk_index, document_id,
         doc_type, priority_weight, intent_tags, metadata,
-        documents(id, title, manufacturers(name_ru))
+        documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
       `)
       .limit(limitChunks * 3)
       .or(words.map(w => `content.ilike.%${w}%`).join(','));
+    if (manufacturer_id) {
+      contentQuery = contentQuery.eq('documents.manufacturer_id', manufacturer_id);
+    }
+    const { data: contentData } = await contentQuery;
 
     // 4б. Поиск по названию документа — ищем точные фразы
     // Формируем фразы: если есть пары "CT 83", "CM 11" и т.д.
@@ -423,15 +416,19 @@ async function searchChunks(
 
     let titleData: any[] = [];
     if (titleFilters.length > 0) {
-      const { data } = await supabase
+      let titleQuery = supabase
         .from('document_chunks')
         .select(`
           id, content, chunk_index, document_id,
           doc_type, priority_weight, intent_tags, metadata,
-          documents!inner(id, title, manufacturers(name_ru))
+          documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
         `)
         .or(titleFilters.join(','))
         .limit(limitChunks * 2);
+      if (manufacturer_id) {
+        titleQuery = titleQuery.eq('documents.manufacturer_id', manufacturer_id);
+      }
+      const { data } = await titleQuery;
       titleData = data ?? [];
     }
 
