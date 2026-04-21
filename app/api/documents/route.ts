@@ -4,6 +4,19 @@ import crypto from "crypto";
 
 export const maxDuration = 60;
 
+function detectDocType(fileName: string): string {
+  const name = fileName.toLowerCase();
+  if (name.includes("тех") && (name.includes("описание") || name.includes("лист"))) return "tds";
+  if (name.includes("сертификат пожарн")) return "сертификат";
+  if (name.includes("сертификат соответ")) return "сертификат";
+  if (name.includes("декларация")) return "сертификат";
+  if (name.includes("свидетельство") || name.includes("сан")) return "сертификат";
+  if (name.includes("прайс") || name.includes("price")) return "прайс";
+  if (name.includes("инструкц") || name.includes("монтаж")) return "инструкция";
+  if (name.includes("каталог")) return "tds";
+  return "tds"; // по умолчанию
+}
+
 export async function GET() {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -29,18 +42,28 @@ export async function POST(request: NextRequest) {
     const title = (formData.get("title") || formData.get("name") || "") as string;
     const manufacturer_id = formData.get("manufacturer_id") as string | null;
     const product_id = formData.get("product_id") as string | null;
-    const doc_type = (formData.get("doc_type") || "tds") as string;
-    const DOC_TYPE_MAP: Record<string, string> = {
-      tds: "техлист",
-      script: "инструкция",
-      compare: "техлист",
-      norm: "техлист",
-      install: "инструкция",
-      price: "прайс",
-      certificate: "сертификат",
-      addition: "дополнение",
-    };
-    const doc_type_ru = DOC_TYPE_MAP[doc_type] ?? "техлист";
+    const doc_type_raw = formData.get("doc_type") as string || '';
+    const fileName_orig = file.name;
+
+    // Если тип не передан — определяем автоматически по имени файла
+    let doc_type_ru: string;
+    if (doc_type_raw && doc_type_raw !== "tds") {
+      const DOC_TYPE_MAP: Record<string, string> = {
+        tds: "техлист", script: "инструкция", compare: "техлист",
+        norm: "техлист", install: "инструкция", price: "прайс",
+        certificate: "сертификат", addition: "дополнение",
+      };
+      doc_type_ru = DOC_TYPE_MAP[doc_type_raw] ?? "техлист";
+    } else {
+      // Автоопределение по имени файла
+      const autoType = detectDocType(fileName_orig);
+      const AUTO_MAP: Record<string, string> = {
+        'tds': 'техлист', 'сертификат': 'сертификат',
+        'прайс': 'прайс', 'инструкция': 'инструкция'
+      };
+      doc_type_ru = AUTO_MAP[autoType] ?? 'техлист';
+      console.log(`🔍 Автоопределение типа: ${fileName_orig} → ${doc_type_ru}`);
+    }
     const priority_weight = Number(formData.get("priority_weight") || 0) || null;
     const intent_tags_raw = (formData.get("intent_tags") || "[]") as string;
     let intent_tags: string[] = [];
