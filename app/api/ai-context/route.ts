@@ -331,8 +331,9 @@ async function searchChunks(
   // 4. ILIKE последний шанс
   if (query.length >= 2) {
     console.log('4️⃣ Trying ILIKE with query:', query);
-    const words = query.split(/\s+/).filter(w => w.length >= 3);
-    let ilikeQuery = supabase
+    // 4а. Поиск по содержимому чанков (OR по словам)
+    const words = query.split(/\s+/).filter(w => w.length >= 2);
+    const { data: contentData } = await supabase
       .from('document_chunks')
       .select(`
         id, content, chunk_index, document_id,
@@ -340,14 +341,29 @@ async function searchChunks(
         documents(id, title, manufacturers(name_ru))
       `)
       .limit(limitChunks * 3)
+      .or(words.map(w => `content.ilike.%${w}%`).join(','));
 
-    // Добавляем OR условия для каждого слова
-    if (words.length > 0) {
-      ilikeQuery = ilikeQuery.or(
-        words.map(w => `content.ilike.%${w}%`).join(',')
-      );
-    }
-    const { data: ilikeData } = await ilikeQuery;
+    // 4б. Поиск по названию документа
+    const { data: titleData } = await supabase
+      .from('document_chunks')
+      .select(`
+        id, content, chunk_index, document_id,
+        doc_type, priority_weight, intent_tags, metadata,
+        documents!inner(id, title, manufacturers(name_ru))
+      `)
+      .or(words.map(w => `documents.title.ilike.%${w}%`).join(','))
+      .limit(limitChunks * 2);
+
+    // Объединяем результаты, убираем дубли по id
+    const combined = [...(contentData ?? []), ...(titleData ?? [])];
+    const seen = new Set<string>();
+    const ilikeData = combined.filter(r => {
+      const id = (r as any).id;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
     console.log('✅ Found N chunks via ILIKE:', ilikeData?.length ?? 0);
     return ((ilikeData ?? []) as Record<string, unknown>[]).map(normalizeChunk)
   }
