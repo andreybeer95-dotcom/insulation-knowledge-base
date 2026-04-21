@@ -136,7 +136,34 @@ export async function GET(request: NextRequest) {
   const rawChunks = chunksRes.status   === 'fulfilled' ? chunksRes.value          : []
 
   const chunks = deduplicateChunks(rawChunks, limitChunks)
-  const formattedContext = buildContext(query, products, rules, notes, chunks)
+  const { data: rulesData } = await supabase
+    .from('selection_rules')
+    .select('id, rule_name, condition, rule_text, priority, is_prohibition')
+    .order('priority', { ascending: true });
+
+  const allRules = rulesData ?? [];
+
+  // Фильтруем правила релевантные запросу
+  const queryLower = query.toLowerCase();
+  const relevantRules = allRules.filter(rule => {
+    const conditions = rule.condition.toLowerCase().split(/[,+\s]+/);
+    return conditions.some((cond: string) =>
+      cond.length > 2 && queryLower.includes(cond)
+    );
+  });
+
+  // Если релевантных нет — берём все запреты (они всегда важны)
+  const applicable_rules = relevantRules.length > 0
+    ? relevantRules
+    : allRules.filter(r => r.is_prohibition);
+
+  let formattedContext = buildContext(query, products, rules, notes, chunks)
+  if (applicable_rules.length > 0) {
+    const rulesText = applicable_rules
+      .map(r => `${r.is_prohibition ? '🚫 ЗАПРЕТ' : '📋 ПРАВИЛО'}: ${r.rule_name}\n${r.rule_text}`)
+      .join('\n\n');
+    formattedContext += '\n\n## Правила подбора\n' + rulesText;
+  }
 
   return NextResponse.json({
     query: rawQuery,
@@ -144,13 +171,13 @@ export async function GET(request: NextRequest) {
     filters: { product_id, category_id, intent_tags, doc_types: doc_types_arr },
     detected: detectContext(query),
     relevant_products: products,
-    applicable_rules: rules,
+    applicable_rules,
     relevant_notes: notes,
     document_chunks: chunks,
     formatted_context: formattedContext,
     meta: {
       products_count: products.length,
-      rules_count:    rules.length,
+      rules_count:    applicable_rules.length,
       notes_count:    notes.length,
       chunks_count:   chunks.length,
     },
