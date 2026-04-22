@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getServiceSupabase } from "@/lib/server-supabase";
 import crypto from "crypto";
 
 export const maxDuration = 60;
@@ -50,6 +51,40 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
         .from('manufacturers')
         .select('id')
         .ilike('name_ru', brandName)
+        .single();
+      if (data) return data.id;
+    }
+  }
+  return null;
+}
+
+async function detectManufacturerFromContent(
+  text: string,
+  supabase: ReturnType<typeof getServiceSupabase>
+): Promise<string | null> {
+  const contentLower = text.toLowerCase().slice(0, 3000);
+
+  const contentBrands: Record<string, string[]> = {
+    "Индастро": ["индастро", "indastro", "профскрин", "profskrin", "rc45"],
+    "Основит": ["основит", "osnovit", "ekstervell", "startvell", "gipsvell",
+      "kaverpliks", "univita", "selform", "skorlayn", "rovilayn",
+      "eksterkont", "unkont", "niplayn", "seyfskrin"],
+    "Церезит": ["церезит", "ceresit", "henkel", "лаб индастриз"],
+    "Плитонит": ["плитонит", "plitonit", "plitosil", "nafufill"],
+    "Веккерле": ["веккерле", "vekkerle", "цпс", "цемент м500"],
+    "XOTPIPE": ["xotpipe", "хотпайп", "хотрipe", "bos-pipe"],
+    "ЭКОРОЛЛ": ["экоролл", "ekoroll", "катвул", "cutwool", "кв-80", "кв-100"],
+    "ROCKWOOL": ["rockwool", "роквул", "rockwool"],
+    "ISOTEC": ["isotec", "изотек", "section al"],
+    "CUTWOOL": ["cutwool", "катвул"],
+  };
+
+  for (const [brandName, keywords] of Object.entries(contentBrands)) {
+    if (keywords.some((kw) => contentLower.includes(kw))) {
+      const { data } = await supabase
+        .from("manufacturers")
+        .select("id")
+        .ilike("name_ru", brandName)
         .single();
       if (data) return data.id;
     }
@@ -264,7 +299,31 @@ async function extractAndChunk(documentId: string, buffer: Buffer) {
       );
     }
 
-    await supabase.from("documents").update({ extracted_text: extractedText.slice(0, 10000) }).eq("id", documentId);
+    let detectedManufacturerId: string | null = null;
+    const { data: existingDoc } = await supabase
+      .from("documents")
+      .select("manufacturer_id")
+      .eq("id", documentId)
+      .single();
+    let manufacturer_id = (existingDoc?.manufacturer_id as string | null) ?? null;
+
+    if (!manufacturer_id && chunks.length > 0) {
+      const fullText = chunks.join(" ");
+      detectedManufacturerId = await detectManufacturerFromContent(
+        fullText,
+        supabase as ReturnType<typeof getServiceSupabase>
+      );
+      if (detectedManufacturerId) {
+        manufacturer_id = detectedManufacturerId;
+        console.log("🔍 Производитель определён по содержимому PDF");
+      }
+    }
+
+    const updatePayload: Record<string, unknown> = { extracted_text: extractedText.slice(0, 10000) };
+    if (manufacturer_id) {
+      updatePayload.manufacturer_id = manufacturer_id;
+    }
+    await supabase.from("documents").update(updatePayload).eq("id", documentId);
 
     console.log(`✅ PDF обработан: ${documentId}, страниц: ${parsedPdf.numpages}, чанков: ${chunks.length}`);
     return { success: true, chunks_created: chunks.length };
