@@ -43,6 +43,9 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
     'ROCKWOOL': ['rockwool', 'роквул', 'rwl', 'sp alu'],
     'CUTWOOL': ['cutwool', 'катвул'],
     'ISOTEC': ['isotec', 'изотек', 'shell', 'section al'],
+    'ПРЕСТОРУСЬ': ['престорусь', 'prestorus', 'стабарм', 'stabarm', 'георешетка', 'presto.ru'],
+    'АРМОСТАБ': ['армостаб', 'armostab', 'армостаб ар2п', 'армостаб асфальт'],
+    'ЮниФенс': ['юнифенс', 'unifence', 'unifens'],
   };
   
   for (const [brandName, keywords] of Object.entries(brandKeywords)) {
@@ -77,6 +80,9 @@ async function detectManufacturerFromContent(
     "ROCKWOOL": ["rockwool", "роквул", "rockwool"],
     "ISOTEC": ["isotec", "изотек", "section al"],
     "CUTWOOL": ["cutwool", "катвул"],
+    "ПРЕСТОРУСЬ": ["престорусь", "prestorus", "стабарм", "stabarm", "георешетка", "presto.ru"],
+    "АРМОСТАБ": ["армостаб", "armostab", "армостаб ар2п", "армостаб асфальт"],
+    "ЮниФенс": ["юнифенс", "unifence", "unifens"],
   };
 
   for (const [brandName, keywords] of Object.entries(contentBrands)) {
