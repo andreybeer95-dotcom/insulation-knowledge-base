@@ -25,7 +25,7 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
   const brandKeywords: Record<string, string[]> = {
     'Церезит': ['церезит', 'ceresit', 'см 11', 'см 14', 'см 16', 'ст 83', 'ст 180', 'cr 65', 'cr65', 'cr65'],
     'Плитонит': ['плитонит', 'plitонit', 'plitosil', 'плитосил'],
-    'Основит': ['основит', 'osnovit'],
+    'Основит': ['основит', 'osnovit', 'ekstervell', 'экстервелл', 'экстервэлл'],
     'Индастро': ['индастро', 'indastro', 'профскрин', 'rc45'],
     'Веккерле': ['веккерле', 'vekkerle', 'цпс', 'цемент м500'],
     'ЭКОРОЛЛ': ['экоролл', 'ekoroll', 'кв-', 'кв80', 'кв100'],
