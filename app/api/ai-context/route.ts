@@ -151,14 +151,20 @@ export async function GET(request: NextRequest) {
     'ekoroll': '4deb56f0-b7c9-46e9-8279-9fc4397419dd',
     'rockwool': '6f22e435-08cc-46ab-ba45-d119ce497581',
     'роквул': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'вайред': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'вайред мат': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'rwl': '6f22e435-08cc-46ab-ba45-d119ce497581',
+    'ламелла мат': '6f22e435-08cc-46ab-ba45-d119ce497581',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
 
   let detectedManufacturerId: string | null = null;
+  let detectedManufacturerKeyword: string | null = null;
   for (const [kw, id] of Object.entries(manufacturerMap)) {
     if (queryLowerRaw.includes(kw)) {
       detectedManufacturerId = id;
+      detectedManufacturerKeyword = kw;
       break;
     }
   }
@@ -187,7 +193,11 @@ export async function GET(request: NextRequest) {
         manufacturer_id, manufacturers(name_ru),
         category_id, categories(name, full_path)
       `)
-      .eq(product_id ? 'id' : 'in_stock', product_id ?? true)
+      .eq('in_stock', true)
+      .ilike(
+        'name',
+        !product_id && detectedManufacturerKeyword ? `%${detectedManufacturerKeyword}%` : '%'
+      )
       .limit(20),
 
     // правила подбора (таблица осталась прежней)
