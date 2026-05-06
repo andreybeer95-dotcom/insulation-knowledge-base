@@ -47,7 +47,8 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
     'АРМОСТАБ': ['армостаб', 'armostab', 'армостаб ар2п', 'армостаб асфальт'],
     'ЮниФенс': ['юнифенс', 'unifence', 'unifens'],
     "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
-    "BASWOOL": ["baswool", "басвул", "агидель"],
+    "BASWOOL": ["baswool", "басвул"],
+    "ЗИКА": ["sika", "зика", "sikaplan", "sikafloor", "sikaemaco"],
   };
   
   for (const [brandName, keywords] of Object.entries(brandKeywords)) {
@@ -86,7 +87,8 @@ async function detectManufacturerFromContent(
     "АРМОСТАБ": ["армостаб", "armostab", "армостаб ар2п", "армостаб асфальт"],
     "ЮниФенс": ["юнифенс", "unifence", "unifens"],
     "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
-    "BASWOOL": ["baswool", "басвул", "агидель"],
+    "BASWOOL": ["baswool", "басвул"],
+    "ЗИКА": ["sika", "зика", "sikaplan", "sikafloor", "sikaemaco"],
     "ИКОПАЛ": ["икопал", "icopal", "виллафлекс", "виллатекс", "виллаэласт", "вилладрейн", "ультранап", "монарплан", "синтан"],
   };
 
