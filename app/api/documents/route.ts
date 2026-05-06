@@ -46,6 +46,8 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
     'ПРЕСТОРУСЬ': ['престорусь', 'prestorus', 'стабарм', 'stabarm', 'георешетка', 'presto.ru'],
     'АРМОСТАБ': ['армостаб', 'armostab', 'армостаб ар2п', 'армостаб асфальт'],
     'ЮниФенс': ['юнифенс', 'unifence', 'unifens'],
+    "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
+    "BASWOOL": ["baswool", "басвул", "агидель"],
   };
   
   for (const [brandName, keywords] of Object.entries(brandKeywords)) {
@@ -83,6 +85,8 @@ async function detectManufacturerFromContent(
     "ПРЕСТОРУСЬ": ["престорусь", "prestorus", "стабарм", "stabarm", "георешетка", "presto.ru"],
     "АРМОСТАБ": ["армостаб", "armostab", "армостаб ар2п", "армостаб асфальт"],
     "ЮниФенс": ["юнифенс", "unifence", "unifens"],
+    "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
+    "BASWOOL": ["baswool", "басвул", "агидель"],
   };
 
   for (const [brandName, keywords] of Object.entries(contentBrands)) {
