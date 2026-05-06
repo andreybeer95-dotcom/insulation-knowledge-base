@@ -87,6 +87,7 @@ async function detectManufacturerFromContent(
     "ЮниФенс": ["юнифенс", "unifence", "unifens"],
     "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
     "BASWOOL": ["baswool", "басвул", "агидель"],
+    "ИКОПАЛ": ["икопал", "icopal", "виллафлекс", "виллатекс", "виллаэласт", "вилладрейн", "ультранап", "монарплан", "синтан"],
   };
 
   for (const [brandName, keywords] of Object.entries(contentBrands)) {
