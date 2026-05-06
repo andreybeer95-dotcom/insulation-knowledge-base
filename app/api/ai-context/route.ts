@@ -199,10 +199,11 @@ export async function GET(request: NextRequest) {
 
   const supabase = createClient()
   const queryKeywords = query
+  const STOP_WORDS = ['технониколь', 'technonicol', 'rockwool', 'роквул', 'baswool', 'басвул', 'штукатурный', 'навесной', 'утеплитель'];
   const meaningfulKeywords = queryKeywords
-    .split(/\s+/)
-    .map(w => w.trim())
-    .filter(w => w.length > 3)
+    .split(' ')
+    .map(w => w.toLowerCase().trim())
+    .filter(w => w.length > 3 && !STOP_WORDS.includes(w))
 
   // Продукты: сначала производитель + ключевые слова, потом fallback на производителя
   let products: any[] = []
