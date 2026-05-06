@@ -49,6 +49,8 @@ async function detectManufacturer(fileName: string, supabase: any): Promise<stri
     "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
     "BASWOOL": ["baswool", "басвул"],
     "ЗИКА": ["sika", "зика", "sikaplan", "sikafloor", "sikaemaco"],
+    "ПЕНОПЛЭКС": ["пеноплэкс", "penoplex", "plastfoil"],
+    "HOTROCK": ["hotrock", "хотрок"],
   };
   
   for (const [brandName, keywords] of Object.entries(brandKeywords)) {
@@ -89,6 +91,8 @@ async function detectManufacturerFromContent(
     "ТЕХНОНИКОЛЬ": ["технониколь", "technonicol", "технофас", "техновент", "техноруф", "технолайт", "техноблок", "carbon prof", "carbon eco", "logicpir", "роклайт", "изовол", "izovol"],
     "BASWOOL": ["baswool", "басвул"],
     "ЗИКА": ["sika", "зика", "sikaplan", "sikafloor", "sikaemaco"],
+    "ПЕНОПЛЭКС": ["пеноплэкс", "penoplex", "plastfoil"],
+    "HOTROCK": ["hotrock", "хотрок"],
     "ИКОПАЛ": ["икопал", "icopal", "виллафлекс", "виллатекс", "виллаэласт", "вилладрейн", "ультранап", "монарплан", "синтан"],
   };
 

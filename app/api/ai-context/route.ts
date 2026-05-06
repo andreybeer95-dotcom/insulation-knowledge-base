@@ -192,6 +192,11 @@ export async function GET(request: NextRequest) {
     'sikaplan': '7fd8b297-1990-4366-836f-113985a0cd91',
     'sikafloor': '7fd8b297-1990-4366-836f-113985a0cd91',
     'sikaemaco': '7fd8b297-1990-4366-836f-113985a0cd91',
+    'пеноплэкс': '4584f447-4178-4757-901a-00f38614c381',
+    'penoplex': '4584f447-4178-4757-901a-00f38614c381',
+    'plastfoil': '4584f447-4178-4757-901a-00f38614c381',
+    'hotrock': '4bdf5e83-5b51-4e91-8edf-5cef85bd5560',
+    'хотрок': '4bdf5e83-5b51-4e91-8edf-5cef85bd5560',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
