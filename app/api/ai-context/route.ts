@@ -181,11 +181,9 @@ export async function GET(request: NextRequest) {
   };
 
   let detectedManufacturerId: string | null = null;
-  let detectedManufacturerKeyword: string | null = null;
   for (const [kw, id] of Object.entries(manufacturerMap)) {
     if (queryLowerRaw.includes(kw)) {
       detectedManufacturerId = id;
-      detectedManufacturerKeyword = kw;
       break;
     }
   }
@@ -200,12 +198,69 @@ export async function GET(request: NextRequest) {
   const doc_types_arr = docTypesRaw ? docTypesRaw.split(',').map(s => s.trim()) : null
 
   const supabase = createClient()
+  const queryKeywords = query
+  const meaningfulKeywords = queryKeywords
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(w => w.length > 3)
 
-  // ─── параллельные запросы ─────────────────────────────────
-  const [productsRes, rulesRes, notesRes, chunksRes] = await Promise.allSettled([
+  // Продукты: сначала производитель + ключевые слова, потом fallback на производителя
+  let products: any[] = []
+  if (product_id) {
+    const { data } = await supabase
+      .from('products')
+      .select(`
+        id, kod_1c, name, coating, flammability,
+        temp_max, temp_min, diameter_min, diameter_max,
+        density, thickness, in_stock,
+        manufacturer_id, manufacturers(name_ru),
+        category_id, categories(name, full_path)
+      `)
+      .eq('id', product_id)
+      .eq('in_stock', true)
+      .limit(20)
+    products = data ?? []
+  } else if (detectedManufacturerId) {
+    let keywordQuery = supabase
+      .from('products')
+      .select(`
+        id, kod_1c, name, coating, flammability,
+        temp_max, temp_min, diameter_min, diameter_max,
+        density, thickness, in_stock,
+        manufacturer_id, manufacturers(name_ru),
+        category_id, categories(name, full_path)
+      `)
+      .eq('manufacturer_id', detectedManufacturerId)
+      .eq('in_stock', true)
+      .limit(20)
 
-    // продукты — теперь тянем из новой схемы с атрибутами
-    supabase
+    if (meaningfulKeywords.length > 0) {
+      keywordQuery = keywordQuery.or(
+        meaningfulKeywords.map(kw => `name.ilike.%${kw}%`).join(',')
+      )
+    }
+
+    const { data: keywordProducts } = await keywordQuery
+    products = keywordProducts ?? []
+
+    // Fallback: если по ключевым словам мало, берём весь ассортимент производителя
+    if (products.length < 5) {
+      const { data: fallbackProducts } = await supabase
+        .from('products')
+        .select(`
+          id, kod_1c, name, coating, flammability,
+          temp_max, temp_min, diameter_min, diameter_max,
+          density, thickness, in_stock,
+          manufacturer_id, manufacturers(name_ru),
+          category_id, categories(name, full_path)
+        `)
+        .eq('manufacturer_id', detectedManufacturerId)
+        .eq('in_stock', true)
+        .limit(20)
+      products = fallbackProducts ?? []
+    }
+  } else {
+    let genericQuery = supabase
       .from('products')
       .select(`
         id, kod_1c, name, coating, flammability,
@@ -215,11 +270,20 @@ export async function GET(request: NextRequest) {
         category_id, categories(name, full_path)
       `)
       .eq('in_stock', true)
-      .ilike(
-        'name',
-        !product_id && detectedManufacturerKeyword ? `%${detectedManufacturerKeyword}%` : '%'
+      .limit(20)
+
+    if (meaningfulKeywords.length > 0) {
+      genericQuery = genericQuery.or(
+        meaningfulKeywords.map(kw => `name.ilike.%${kw}%`).join(',')
       )
-      .limit(20),
+    }
+
+    const { data } = await genericQuery
+    products = data ?? []
+  }
+
+  // ─── параллельные запросы ─────────────────────────────────
+  const [rulesRes, notesRes, chunksRes] = await Promise.allSettled([
 
     // правила подбора (таблица осталась прежней)
     supabase
@@ -245,7 +309,6 @@ export async function GET(request: NextRequest) {
     }),
   ])
 
-  const products  = productsRes.status === 'fulfilled' ? (productsRes.value.data ?? []) : []
   const rules     = rulesRes.status    === 'fulfilled' ? (rulesRes.value.data    ?? []) : []
   const notes     = notesRes.status    === 'fulfilled' ? (notesRes.value.data    ?? []) : []
   const rawChunks = chunksRes.status   === 'fulfilled' ? chunksRes.value          : []
