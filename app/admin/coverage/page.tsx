@@ -43,7 +43,7 @@ export default function CoveragePage() {
         .from("document_coverage")
         .select("id, brand, series, status, priority, notes")
         .order("brand", { ascending: true }),
-      supabase.from("nomenclature_1c").select("brand"),
+      supabase.rpc("get_nomenclature_counts"),
     ]);
 
     if (coverageRes.error) {
@@ -59,15 +59,10 @@ export default function CoveragePage() {
 
     setRows((coverageRes.data ?? []) as unknown as CoverageRow[]);
 
-    const counts =
-      (nomenclatureRes.data as Array<{ brand: string }> | null)?.reduce(
-        (acc, row) => {
-          if (row?.brand) acc[row.brand] = (acc[row.brand] || 0) + 1;
-          return acc;
-        },
-        {} as Record<string, number>,
-      ) ?? {};
-    setPositionsCount(counts);
+    const positionsCount = Object.fromEntries(
+      (nomenclatureRes.data || []).map((row: { brand: string; count: number }) => [row.brand, row.count]),
+    );
+    setPositionsCount(positionsCount);
 
     setLoading(false);
   }, []);
