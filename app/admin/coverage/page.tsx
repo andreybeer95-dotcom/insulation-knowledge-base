@@ -14,23 +14,6 @@ type CoverageRow = {
   notes: string | null;
 };
 
-const nomenclature_gaps: Array<{
-  brand: string;
-  product: string;
-  positions_1c: number;
-  priority: number;
-}> = [
-  { brand: "K-FLEX", product: "K-FLEX ST трубки/рулоны", positions_1c: 6432, priority: 1 },
-  { brand: "ПЕНОПЛЭКС", product: "Комфорт / Фундамент / Основа", positions_1c: 131, priority: 1 },
-  { brand: "КРОЗ", product: "ВБОР / Firestill", positions_1c: 419, priority: 1 },
-  { brand: "КНАУФ", product: "KNAUF INSULATION TS/AS", positions_1c: 509, priority: 1 },
-  { brand: "PRO-МБОР", product: "МБОР 5/8/10/13/16", positions_1c: 80, priority: 1 },
-  { brand: "BASWOOL", product: "ECOROCK / ФЛОР", positions_1c: 24, priority: 2 },
-  { brand: "ISOVER", product: "Каталог продукции", positions_1c: 84, priority: 2 },
-  { brand: "ИЗОБОКС", product: "Каталог продукции", positions_1c: 49, priority: 2 },
-  { brand: "ПАРОК", product: "Каталог продукции", positions_1c: 49, priority: 3 },
-];
-
 const priorityIcon = (p: number | null): string => {
   if (p === 1) return "🔴";
   if (p === 2) return "🟡";
@@ -38,15 +21,9 @@ const priorityIcon = (p: number | null): string => {
   return "⚪";
 };
 
-const priorityFullLabel = (p: number): string => {
-  if (p === 1) return "🔴 Высокий";
-  if (p === 2) return "🟡 Средний";
-  if (p === 3) return "🟢 Низкий";
-  return "⚪";
-};
-
 export default function CoveragePage() {
   const [rows, setRows] = useState<CoverageRow[]>([]);
+  const [positionsCount, setPositionsCount] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
@@ -60,16 +37,38 @@ export default function CoveragePage() {
       setLoading(false);
       return;
     }
-    const { data, error: err } = await supabase
-      .from("document_coverage")
-      .select("id, brand, series, status, priority, notes")
-      .order("brand", { ascending: true });
-    if (err) {
-      setError(err.message);
+
+    const [coverageRes, nomenclatureRes] = await Promise.all([
+      supabase
+        .from("document_coverage")
+        .select("id, brand, series, status, priority, notes")
+        .order("brand", { ascending: true }),
+      supabase.from("nomenclature_1c").select("brand"),
+    ]);
+
+    if (coverageRes.error) {
+      setError(coverageRes.error.message);
       setLoading(false);
       return;
     }
-    setRows((data ?? []) as unknown as CoverageRow[]);
+    if (nomenclatureRes.error) {
+      setError(nomenclatureRes.error.message);
+      setLoading(false);
+      return;
+    }
+
+    setRows((coverageRes.data ?? []) as unknown as CoverageRow[]);
+
+    const counts =
+      (nomenclatureRes.data as Array<{ brand: string }> | null)?.reduce(
+        (acc, row) => {
+          if (row?.brand) acc[row.brand] = (acc[row.brand] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ) ?? {};
+    setPositionsCount(counts);
+
     setLoading(false);
   }, []);
 
@@ -120,6 +119,11 @@ export default function CoveragePage() {
       return a.brand.localeCompare(b.brand, "ru");
     });
 
+  const totalPositions = Object.values(positionsCount).reduce((s, n) => s + n, 0);
+  const positionsRows = Object.entries(positionsCount)
+    .map(([brand, count]) => ({ brand, count }))
+    .sort((a, b) => b.count - a.count);
+
   return (
     <div className="space-y-6">
       <div>
@@ -155,6 +159,7 @@ export default function CoveragePage() {
                   : s.pct > 50
                     ? "border-yellow-200 bg-yellow-50"
                     : "border-red-200 bg-red-50";
+              const positions = positionsCount[s.brand] || 0;
               return (
                 <div key={s.brand} className={`rounded-lg border p-3 shadow-sm ${cardColor}`}>
                   <div className="mb-2 flex items-center justify-between">
@@ -169,6 +174,12 @@ export default function CoveragePage() {
                     <span>❌ {s.missing} не хватает</span>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">Всего: {s.total}</p>
+                  <p className="mt-1 text-xs text-slate-700">
+                    Позиций в 1С:{" "}
+                    <span className="font-semibold tabular-nums">
+                      {positions.toLocaleString("ru-RU")}
+                    </span>
+                  </p>
                 </div>
               );
             })}
@@ -231,31 +242,37 @@ export default function CoveragePage() {
       )}
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Номенклатура 1С без документов</h2>
+        <h2 className="mb-3 text-lg font-semibold">
+          Номенклатура 1С без документов{" "}
+          <span className="text-sm font-normal text-slate-500">
+            ({positionsRows.length} брендов · {totalPositions.toLocaleString("ru-RU")} позиций)
+          </span>
+        </h2>
         <p className="mb-2 text-sm text-slate-600">
-          Бренды и продукты с большим количеством позиций в 1С, для которых ещё не загружены TDS/каталоги.
+          Реальные данные из таблицы <code>nomenclature_1c</code>, отсортированы по убыванию числа позиций.
         </p>
         <div className="overflow-x-auto rounded border">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="bg-slate-100 text-left">
                 <th className="p-2">Бренд</th>
-                <th className="p-2">Продукт</th>
                 <th className="p-2">Позиций в 1С</th>
-                <th className="p-2">Приоритет</th>
               </tr>
             </thead>
             <tbody>
-              {nomenclature_gaps.map((g, idx) => (
-                <tr key={`${g.brand}-${idx}`} className="border-t">
-                  <td className="p-2 font-medium">{g.brand}</td>
-                  <td className="p-2">{g.product}</td>
-                  <td className="p-2 tabular-nums">
-                    {g.positions_1c.toLocaleString("ru-RU")}
-                  </td>
-                  <td className="p-2">{priorityFullLabel(g.priority)}</td>
+              {positionsRows.map((row) => (
+                <tr key={row.brand} className="border-t">
+                  <td className="p-2 font-medium">{row.brand}</td>
+                  <td className="p-2 tabular-nums">{row.count.toLocaleString("ru-RU")}</td>
                 </tr>
               ))}
+              {positionsRows.length === 0 && !loading && (
+                <tr>
+                  <td className="p-3 text-center text-slate-500" colSpan={2}>
+                    В таблице <code>nomenclature_1c</code> пока нет записей.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
