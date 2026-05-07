@@ -205,6 +205,13 @@ export async function GET(request: NextRequest) {
     'knauf': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
     'кнауф инсулейшн': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
     'теплокнауф': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
+    'кроз': 'f3299ec6-1174-44dc-8c14-457adf1bc7a9',
+    'kroz': 'f3299ec6-1174-44dc-8c14-457adf1bc7a9',
+    'огневент': 'f3299ec6-1174-44dc-8c14-457adf1bc7a9',
+    'вбор': 'f3299ec6-1174-44dc-8c14-457adf1bc7a9',
+    'pro-мбор': 'c2b8ab7c-79a8-40dd-882a-07e1f591de8d',
+    'промбор': 'c2b8ab7c-79a8-40dd-882a-07e1f591de8d',
+    'мбор': 'c2b8ab7c-79a8-40dd-882a-07e1f591de8d',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
