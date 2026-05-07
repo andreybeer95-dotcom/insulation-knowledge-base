@@ -197,6 +197,10 @@ export async function GET(request: NextRequest) {
     'plastfoil': '4584f447-4178-4757-901a-00f38614c381',
     'hotrock': '4bdf5e83-5b51-4e91-8edf-5cef85bd5560',
     'хотрок': '4bdf5e83-5b51-4e91-8edf-5cef85bd5560',
+    'k-flex': 'e60a463e-1471-4491-a323-4a13f375f044',
+    'кфлекс': 'e60a463e-1471-4491-a323-4a13f375f044',
+    'к-флекс': 'e60a463e-1471-4491-a323-4a13f375f044',
+    'kflex': 'e60a463e-1471-4491-a323-4a13f375f044',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };

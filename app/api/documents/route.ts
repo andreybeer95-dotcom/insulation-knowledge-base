@@ -93,6 +93,7 @@ async function detectManufacturerFromContent(
     "ЗИКА": ["sika", "зика", "sikaplan", "sikafloor", "sikaemaco"],
     "ПЕНОПЛЭКС": ["пеноплэкс", "penoplex", "plastfoil"],
     "HOTROCK": ["hotrock", "хотрок"],
+    "K-FLEX": ["k-flex", "kflex", "к-флекс", "кфлекс"],
     "ИКОПАЛ": ["икопал", "icopal", "виллафлекс", "виллатекс", "виллаэласт", "вилладрейн", "ультранап", "монарплан", "синтан"],
   };
 
