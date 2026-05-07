@@ -201,6 +201,10 @@ export async function GET(request: NextRequest) {
     'кфлекс': 'e60a463e-1471-4491-a323-4a13f375f044',
     'к-флекс': 'e60a463e-1471-4491-a323-4a13f375f044',
     'kflex': 'e60a463e-1471-4491-a323-4a13f375f044',
+    'кнауф': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
+    'knauf': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
+    'кнауф инсулейшн': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
+    'теплокнауф': 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
