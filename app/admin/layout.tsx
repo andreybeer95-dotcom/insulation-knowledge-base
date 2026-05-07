@@ -10,7 +10,8 @@ const menu: Array<{ href: Route; label: string }> = [
   { href: "/admin/prices", label: "Цены" },
   { href: "/admin/certificates", label: "Сертификаты" },
   { href: "/admin/changelog", label: "История изменений" },
-  { href: "/admin/rules", label: "Правила подбора" }
+  { href: "/admin/rules", label: "Правила подбора" },
+  { href: "/admin/coverage" as Route, label: "Покрытие документов" }
 ];
 
 export const dynamic = "force-dynamic";
