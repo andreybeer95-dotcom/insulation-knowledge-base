@@ -44,25 +44,40 @@ export async function POST(req: NextRequest) {
         })
         const html = await response.text()
 
-        const pdfMatches = html.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []
+        const linkMatches = html.match(/uddg=(https?[^&"]+)/gi) || []
+        const pdfLinks: string[] = []
+
+        linkMatches.forEach((match) => {
+          try {
+            const encoded = match.replace(/^uddg=/i, '')
+            const decoded = decodeURIComponent(encoded)
+            if (decoded.toLowerCase().includes('.pdf') && decoded.includes(site)) {
+              pdfLinks.push(decoded)
+            }
+          } catch {
+            /* ignore malformed encoding */
+          }
+        })
+
+        const directPdfs = html.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []
+        directPdfs.forEach((u) => {
+          if (u.includes(site)) pdfLinks.push(u)
+        })
+
         if (qi === 0) {
           console.log('HTML length:', html.length)
           console.log('HTML sample:', html.substring(0, 500))
-          console.log('PDF matches found:', pdfMatches.length)
+          console.log('Link matches:', linkMatches.length)
+          console.log('PDF links found:', pdfLinks.length)
         }
-        const titleMatches = html.match(/<a[^>]*class="result__a"[^>]*>([^<]+)<\/a>/gi) || []
 
-        pdfMatches.forEach((pdfUrl, i) => {
-          if (pdfUrl.includes(site)) {
-            allPdfs.push({
-              url: pdfUrl,
-              title:
-                titleMatches[i]?.replace(/<[^>]+>/g, '').trim() ||
-                pdfUrl.split('/').pop() ||
-                'document',
-            })
-          }
-        })
+        const uniqueUrls = [...new Set(pdfLinks)]
+        const pdfsForQuery: PdfHit[] = uniqueUrls.map((pdfUrl) => ({
+          url: pdfUrl,
+          title:
+            pdfUrl.split('/').pop()?.replace(/\.pdf$/i, '').replace(/_/g, ' ') || 'document',
+        }))
+        allPdfs.push(...pdfsForQuery)
       } catch (e) {
         console.error('Search error:', e)
       }
