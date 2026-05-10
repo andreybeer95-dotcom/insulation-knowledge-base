@@ -21,10 +21,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const siteKey = site.replace('www.', '')
+
     const queries = [
-      `site:${site} filetype:pdf технический лист`,
-      `site:${site} filetype:pdf сертификат`,
-      `site:${site} filetype:pdf каталог`,
+      `${brand} технический лист PDF`,
+      `${brand} сертификат соответствия PDF`,
+      `${brand} каталог продукции PDF скачать`,
     ]
 
     const allPdfs: PdfHit[] = []
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
           try {
             const encoded = match.replace(/^uddg=/i, '')
             const decoded = decodeURIComponent(encoded)
-            if (decoded.toLowerCase().includes('.pdf') && decoded.includes(site)) {
+            if (decoded.toLowerCase().includes('.pdf') && decoded.includes(siteKey)) {
               pdfLinks.push(decoded)
             }
           } catch {
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
 
         const directPdfs = html.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []
         directPdfs.forEach((u) => {
-          if (u.includes(site)) pdfLinks.push(u)
+          if (u.includes(siteKey)) pdfLinks.push(u)
         })
 
         if (qi === 0) {
