@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
 
     const allPdfs: PdfHit[] = []
 
-    for (const query of queries) {
+    for (let qi = 0; qi < queries.length; qi++) {
+      const query = queries[qi]
       try {
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
         const response = await fetch(url, {
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest) {
         const html = await response.text()
 
         const pdfMatches = html.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []
+        if (qi === 0) {
+          console.log('HTML length:', html.length)
+          console.log('HTML sample:', html.substring(0, 500))
+          console.log('PDF matches found:', pdfMatches.length)
+        }
         const titleMatches = html.match(/<a[^>]*class="result__a"[^>]*>([^<]+)<\/a>/gi) || []
 
         pdfMatches.forEach((pdfUrl, i) => {
