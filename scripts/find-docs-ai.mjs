@@ -38,7 +38,10 @@ async function findDocs(brand) {
 
   const response = await fetch(`${SITE_URL}/api/find-docs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': process.env.INTERNAL_API_SECRET || '',
+    },
     body: JSON.stringify({ brand: brand.name, site: brand.site }),
   })
 
@@ -99,4 +102,7 @@ async function main() {
   console.log('\n✅ Готово!')
 }
 
-main()
+main().catch((e) => {
+  console.error('Fatal:', e)
+  process.exit(1)
+})

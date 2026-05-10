@@ -16,14 +16,11 @@ export default function LoginPage() {
       setMessage("Supabase env переменные не настроены.");
       return;
     }
-    console.log("[login] signInWithPassword:start", { email });
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      console.log("[login] signInWithPassword:error", error.message);
       setMessage(error.message);
       return;
     }
-    console.log("[login] signInWithPassword:ok", { hasUser: Boolean(data?.user), hasSession: Boolean(data?.session) });
     if (data?.user) {
       router.push("/admin");
       router.refresh();

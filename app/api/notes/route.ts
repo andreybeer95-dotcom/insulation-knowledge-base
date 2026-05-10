@@ -9,7 +9,9 @@ export async function GET(request: NextRequest) {
   const supabase = getServerSupabase();
   const search = new URL(request.url).searchParams.get("search");
   let query = supabase.from("knowledge_notes").select("*").order("updated_at", { ascending: false });
-  if (search) query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+  if (search) {
+    query = query.ilike("title", `%${search}%`);
+  }
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ items: data ?? [] });

@@ -14,6 +14,14 @@ interface GoogleCseResponse {
 
 export async function POST(req: NextRequest) {
   try {
+    const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET
+    if (INTERNAL_SECRET) {
+      const authHeader = req.headers.get('x-internal-secret')
+      if (authHeader !== INTERNAL_SECRET) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+    }
+
     const { brand, site } = await req.json()
 
     if (!brand || !site || typeof brand !== 'string' || typeof site !== 'string') {
