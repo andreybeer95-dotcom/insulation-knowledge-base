@@ -1,15 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
-import { chromium } from 'playwright'
 import fs from 'fs'
-
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  'https://insulation-knowledge-base-production.up.railway.app'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
+
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  'https://insulation-knowledge-base-production.up.railway.app'
 
 const BRANDS = [
   { name: 'ROCKWOOL', manufacturer_id: '6f22e435-08cc-46ab-ba45-d119ce497581', site: 'rwl.ru' },
@@ -17,71 +16,42 @@ const BRANDS = [
   { name: 'ОНДУТИС', name_ru: 'ОНДУТИС', site: 'ondutis.ru' },
   { name: 'ПЕНЕТРОН', manufacturer_id: '2687b7ce-c178-4f81-a6c1-355fd82e6e08', site: 'penetron.ru' },
   { name: 'ИМПЕР', manufacturer_id: 'f03dbf70-77b2-464b-892d-ba9ec14af826', site: 'tn.ru' },
-  { name: 'КАЛКАН', manufacturer_id: '8475938d-ad24-4c0b-8036-a09cbb82b36a', site: 'kalkan-insulation.ru' },
   { name: 'ЭНЕРГОФЛЕКС', manufacturer_id: '4d0e322c-9a32-41e1-9cfb-8b84161a6319', site: 'rols-isomarket.ru' },
+  { name: 'URSA', manufacturer_id: 'c281f409-592e-4404-abc0-9144cc046941', site: 'ursa.ru' },
+  { name: 'ТЕРМАФЛЕКС', name_ru: 'ТЕРМАФЛЕКС', site: 'thermaflex.ru' },
+  { name: 'КАЛКАН', manufacturer_id: '8475938d-ad24-4c0b-8036-a09cbb82b36a', site: 'kalkan-insulation.ru' },
+  { name: 'BASWOOL', manufacturer_id: 'c0f1731c-12a2-4d6a-bca3-6020711de7f5', site: 'baswool.ru' },
+  { name: 'ЗВУКОИЗОЛ', manufacturer_id: '704afeef-945d-4f26-b003-8e8c9047b6b0', site: 'zvukoizol.ru' },
 ]
 
-async function callAI(screenshot, site) {
+function detectDocType(title) {
+  const t = (title || '').toLowerCase()
+  if (t.includes('сертификат') || t.includes('декларац') || t.includes('гигиен') || t.includes('пожарн')) return 'сертификат'
+  if (t.includes('инструкц') || t.includes('монтаж') || t.includes('руководств')) return 'инструкция'
+  if (t.includes('прайс')) return 'прайс'
+  if (t.includes('каталог') || t.includes('брошюр')) return 'дополнение'
+  return 'техлист'
+}
+
+async function findDocs(brand) {
+  console.log(`\n📁 ${brand.name}`)
+
   const response = await fetch(`${SITE_URL}/api/find-docs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      screenshot: screenshot.toString('base64'),
-      site,
-    }),
+    body: JSON.stringify({ brand: brand.name, site: brand.site }),
   })
-  if (!response.ok) {
-    const t = await response.text()
-    throw new Error(`find-docs API ${response.status}: ${t.slice(0, 800)}`)
-  }
+
   const data = await response.json()
-  return data.pdfs || []
-}
 
-async function findDocsWithAI(browser, brand) {
-  console.log(`\n📁 ${brand.name}`)
-  const page = await browser.newPage()
+  if (data.raw) console.log(`  AI: ${String(data.raw).substring(0, 300)}`)
+  if (data.error) console.log(`  ❌ Ошибка API: ${data.error}`)
 
-  try {
-    const urls = [
-      `https://${brand.site}/dokumenty/`,
-      `https://${brand.site}/documentation/`,
-      `https://${brand.site}/library/`,
-      `https://${brand.site}/`,
-    ]
+  const pdfs = data.pdfs || []
+  console.log(`  Найдено: ${pdfs.length} документов`)
 
-    let screenshot = null
-    let pageUrl = null
-
-    for (const url of urls) {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-        await page.waitForTimeout(2000)
-        screenshot = await page.screenshot({ fullPage: false, type: 'png' })
-        pageUrl = url
-        console.log(`  Открыли: ${url}`)
-        break
-      } catch {}
-    }
-
-    if (!screenshot) {
-      console.log(`  ❌ Сайт недоступен`)
-      return []
-    }
-
-    const pdfs = await callAI(screenshot, brand.site)
-    if (!Array.isArray(pdfs)) {
-      console.log(`  AI вернул не массив`)
-      return []
-    }
-    console.log(`  Найдено AI: ${pdfs.length} документов (${pageUrl})`)
-    return pdfs
-  } catch (e) {
-    console.error(`  ❌ ${e.message}`)
-    return []
-  } finally {
-    await page.close()
-  }
+  fs.writeFileSync(`scripts/found-docs-${brand.name}.json`, JSON.stringify(pdfs, null, 2))
+  return pdfs
 }
 
 async function saveToDB(pdfs, brand) {
@@ -95,15 +65,6 @@ async function saveToDB(pdfs, brand) {
     mfrId = data?.id ?? null
   }
 
-  function detectDocType(title) {
-    const t = (title || '').toLowerCase()
-    if (t.includes('сертификат') || t.includes('декларац') || t.includes('гигиен') || t.includes('пожарн')) return 'сертификат'
-    if (t.includes('инструкц') || t.includes('монтаж') || t.includes('руководств')) return 'инструкция'
-    if (t.includes('прайс')) return 'прайс'
-    if (t.includes('каталог') || t.includes('брошюр')) return 'дополнение'
-    return 'техлист'
-  }
-
   let saved = 0
   for (const pdf of pdfs) {
     if (!pdf.url || !String(pdf.url).toLowerCase().includes('.pdf')) continue
@@ -111,10 +72,8 @@ async function saveToDB(pdfs, brand) {
     if (data) continue
 
     const fileName = String(pdf.url).split('/').pop() || 'document.pdf'
-    const title = pdf.title || fileName
-
     const { error } = await supabase.from('documents').insert({
-      title,
+      title: pdf.title || fileName,
       manufacturer_id: mfrId,
       source_url: pdf.url,
       file_url: pdf.url,
@@ -122,30 +81,21 @@ async function saveToDB(pdfs, brand) {
       doc_type: detectDocType(pdf.title),
       uploaded_by: 'ai-scraper',
     })
-    if (error) {
-      console.error(`  ❌ INSERT: ${error.message}`)
-    } else {
+    if (!error) {
       saved++
-      console.log(`  ✅ ${title}`)
+      console.log(`  ✅ ${pdf.title || fileName}`)
+    } else {
+      console.error(`  ❌ DB: ${error.message}`)
     }
   }
-  console.log(`  Сохранено: ${saved}`)
+  if (saved > 0) console.log(`  Сохранено: ${saved}`)
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
-
   for (const brand of BRANDS) {
-    const pdfs = await findDocsWithAI(browser, brand)
-    fs.writeFileSync(
-      `scripts/found-docs-ai-${brand.name}.json`,
-      JSON.stringify(pdfs, null, 2),
-      'utf-8'
-    )
+    const pdfs = await findDocs(brand)
     if (pdfs.length > 0) await saveToDB(pdfs, brand)
   }
-
-  await browser.close()
   console.log('\n✅ Готово!')
 }
 
