@@ -15,23 +15,36 @@ const SOURCES = [
       'https://ursa.ru/library/catalogs/brochures/',
       'https://ursa.ru/library/certificates/',
       'https://ursa.ru/library/technical-documentation/',
-      'https://ursa.ru/library/catalogs/',
     ]
   },
   {
     brand: 'ROCKWOOL',
     manufacturer_id: '6f22e435-08cc-46ab-ba45-d119ce497581',
-    custom_scraper: 'rockwool',
     doc_pages: [
       'https://rwl.ru/resources-and-tools/docs/',
+    ]
+  },
+  {
+    brand: 'ИЗОСПАН',
+    manufacturer_id: null,
+    name_ru: 'ИЗОСПАН',
+    doc_pages: [
+      'https://ispan.ru/catalog/',
+    ]
+  },
+  {
+    brand: 'ОНДУТИС',
+    manufacturer_id: null,
+    name_ru: 'ОНДУТИС',
+    doc_pages: [
+      'https://ondutis.ru/catalog/',
     ]
   },
   {
     brand: 'ПЕНЕТРОН',
     manufacturer_id: '2687b7ce-c178-4f81-a6c1-355fd82e6e08',
     doc_pages: [
-      'https://penetron.ru/about/documentation/',
-      'https://penetron.ru/support/documents/',
+      'https://penetron.ru/',
     ]
   },
   {
@@ -40,144 +53,91 @@ const SOURCES = [
     name_ru: 'ТЕРМАФЛЕКС',
     doc_pages: [
       'https://thermaflex.ru/products/',
-      'https://thermaflex.ru/about/documents/',
     ]
   },
   {
-    brand: 'ИЗОСПАН',
-    manufacturer_id: null,
-    name_ru: 'ИЗОСПАН',
+    brand: 'ИМПЕР',
+    manufacturer_id: 'f03dbf70-77b2-464b-892d-ba9ec14af826',
     doc_pages: [
-      'https://ispan.ru/dokumenty/',
-      'https://ispan.ru/sertifikaty/',
-    ]
-  },
-  {
-    brand: 'ОНДУТИС',
-    manufacturer_id: null,
-    name_ru: 'ОНДУТИС',
-    doc_pages: [
-      'https://ondutis.ru/sertifikaty/',
-      'https://ondutis.ru/dokumenty/',
-    ]
-  },
-  {
-    brand: 'ЭНЕРГОФЛЕКС',
-    manufacturer_id: '4d0e322c-9a32-41e1-9cfb-8b84161a6319',
-    doc_pages: [
-      'https://rols-isomarket.ru/documentation/',
-      'https://rols-isomarket.ru/catalog/',
+      'https://tn.ru/catalog/gidroizolyatsiya/rulonnye-bitumnye-materialy/imper/',
     ]
   },
 ]
 
-async function scrapePage(page, url) {
+async function scrapePageDeep(page, url) {
   console.log(`  Открываем: ${url}`)
-  const pdfUrls = new Set()
+  const foundPdfs = new Set()
 
-  // Перехватываем сетевые запросы
-  page.on('response', async (response) => {
-    const responseUrl = response.url()
-    if (responseUrl.toLowerCase().includes('.pdf')) {
-      pdfUrls.add(responseUrl)
-    }
-  })
-
-  try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 })
-    await page.waitForTimeout(3000)
-
-    // Скроллим для lazy loading
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight))
-      await page.waitForTimeout(500)
-    }
-
-    // Собираем PDF ссылки из DOM
-    const domPdfs = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a[href]'))
-        .filter(a => a.href.toLowerCase().includes('.pdf'))
-        .map(a => ({ url: a.href, title: a.textContent.trim() || a.href.split('/').pop() }))
-    })
-
-    // Добавляем перехваченные URL
-    const networkPdfs = Array.from(pdfUrls).map(u => ({
-      url: u,
-      title: u.split('/').pop()
-    }))
-
-    const all = [...domPdfs, ...networkPdfs]
-    // Дедупликация
-    const unique = Array.from(new Map(all.map(p => [p.url, p])).values())
-
-    console.log(`  Найдено PDF: ${unique.length}`)
-    return unique
-
-  } catch (e) {
-    console.error(`  ❌ ${e.message}`)
-    return []
-  }
-}
-
-// Специальная функция для rwl.ru - они используют AJAX API
-async function scrapeRockwool(page) {
-  console.log('  Используем API rwl.ru...')
-  const pdfs = []
-
-  // Перехватываем XHR/fetch запросы
-  const apiResponses = []
   const onResponse = async (response) => {
-    const url = response.url()
-    if (url.includes('/docs/') || url.includes('document') || url.includes('api')) {
-      try {
-        const ct = response.headers()['content-type'] || ''
-        if (ct.includes('json')) {
-          const json = await response.json()
-          apiResponses.push({ url, json })
-        }
-      } catch {}
+    const resUrl = response.url()
+    if (resUrl.toLowerCase().includes('.pdf')) {
+      foundPdfs.add(resUrl)
     }
+    try {
+      const ct = response.headers()['content-type'] || ''
+      if (ct.includes('json') && response.status() === 200) {
+        const text = await response.text()
+        const matches = text.match(/https?:\/\/[^\s"']+\.pdf/gi) || []
+        matches.forEach((m) => foundPdfs.add(m))
+        const relMatches = text.match(/["'](\/[^"']*\.pdf)["']/gi) || []
+        relMatches.forEach((m) => {
+          const clean = m.replace(/["']/g, '')
+          try {
+            const base = new URL(url)
+            foundPdfs.add(base.origin + clean)
+          } catch {}
+        })
+      }
+    } catch {}
   }
+
   page.on('response', onResponse)
 
   try {
-    await page.goto('https://rwl.ru/resources-and-tools/docs/?document_types[]=11&document_types[]=12&document_types[]=13&document_types[]=17', {
-      waitUntil: 'networkidle', timeout: 30000
-    })
-    await page.waitForTimeout(5000)
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 })
 
-    // Скроллим и кликаем "показать ещё" если есть
-    try {
-      const btn = await page.$('button:has-text("Показать ещё"), button:has-text("Загрузить"), .load-more')
-      if (btn) { await btn.click(); await page.waitForTimeout(2000) }
-    } catch {}
-
-    // Собираем все ссылки с расширениями документов
-    const links = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a[href]'))
-        .filter(a => {
-          const href = a.href.toLowerCase()
-          return href.includes('.pdf') || href.includes('.doc') ||
-               href.includes('download') || href.includes('upload')
-        })
-        .map(a => ({
-          url: a.href,
-          title: a.closest('[class*="doc"], [class*="card"], [class*="item"]')
-            ?.querySelector('[class*="title"], [class*="name"], h3, h4')
-            ?.textContent?.trim() || a.textContent.trim() || a.href.split('/').pop()
-        }))
-    })
-
-    pdfs.push(...links)
-
-    // Логируем API ответы для отладки
-    if (apiResponses.length > 0) {
-      console.log(`  API responses: ${apiResponses.length}`)
-      fs.writeFileSync('scripts/rwl-api-debug.json', JSON.stringify(apiResponses, null, 2))
+    for (let i = 0; i < 10; i++) {
+      await page.evaluate(() => window.scrollBy(0, 500))
+      await page.waitForTimeout(300)
     }
 
-    console.log(`  DOM ссылки: ${links.length}`)
-    return links
+    const loadMoreSelectors = [
+      'button:has-text("Загрузить ещё")',
+      'button:has-text("Показать ещё")',
+      'button:has-text("Ещё")',
+      '.load-more',
+      '[class*="load-more"]',
+      '[class*="show-more"]',
+    ]
+    for (const sel of loadMoreSelectors) {
+      try {
+        const btn = await page.$(sel)
+        if (btn) {
+          await btn.click()
+          await page.waitForTimeout(2000)
+        }
+      } catch {}
+    }
+
+    await page.waitForTimeout(2000)
+
+    const domLinks = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a[href]'))
+        .map((a) => a.href)
+        .filter((h) => h.toLowerCase().includes('.pdf'))
+    })
+    domLinks.forEach((l) => foundPdfs.add(l))
+
+    const results = Array.from(foundPdfs).map((pdfUrl) => ({
+      url: pdfUrl,
+      title: pdfUrl.split('/').pop().replace('.pdf', '').replace(/_/g, ' ')
+    }))
+
+    console.log(`  Найдено PDF: ${results.length}`)
+    return results
+  } catch (e) {
+    console.error(`  ❌ ${e.message}`)
+    return []
   } finally {
     page.off('response', onResponse)
   }
@@ -264,28 +224,26 @@ async function main() {
 
   for (const source of SOURCES) {
     console.log(`\n📁 ${source.brand}`)
-    let allPDFs = []
+    const allPDFs = []
 
-    if (source.custom_scraper === 'rockwool') {
-      allPDFs = await scrapeRockwool(page)
-    } else {
-      for (const url of source.doc_pages) {
-        try {
-          const pdfs = await scrapePage(page, url)
-          allPDFs.push(...pdfs)
-        } catch (e) {
-          console.error(`  ❌ Ошибка: ${e.message}`)
-        }
+    for (const docUrl of source.doc_pages) {
+      try {
+        const pdfs = await scrapePageDeep(page, docUrl)
+        allPDFs.push(...pdfs)
+      } catch (e) {
+        console.error(`  ❌ Ошибка: ${e.message}`)
       }
     }
 
+    const unique = Array.from(new Map(allPDFs.map((p) => [p.url, p])).values())
+
     fs.writeFileSync(
       `scripts/found-docs-${source.brand}.json`,
-      JSON.stringify(allPDFs, null, 2),
+      JSON.stringify(unique, null, 2),
       'utf-8'
     )
 
-    if (allPDFs.length > 0) await saveToDB(allPDFs, source)
+    if (unique.length > 0) await saveToDB(unique, source)
   }
 
   await browser.close()
