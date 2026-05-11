@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 
 type PdfHit = { url: string; title: string }
 
+const DDG_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+  Referer: 'https://duckduckgo.com/',
+} as const
+
 export async function POST(req: NextRequest) {
   try {
     const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET
@@ -12,7 +20,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { brand, site } = await req.json()
+    const body = await req.json()
+    const { brand, site, searchForSite } = body as {
+      brand?: string
+      site?: string
+      searchForSite?: boolean
+    }
+
+    if (searchForSite) {
+      if (!brand || typeof brand !== 'string') {
+        return NextResponse.json(
+          { pdfs: [], raw: '', error: 'brand (string) is required for searchForSite' },
+          { status: 400 }
+        )
+      }
+      const query = `${brand} официальный сайт производитель строительные материалы`
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=ru-ru`
+      const response = await fetch(ddgUrl, { headers: DDG_HEADERS })
+      const html = await response.text()
+
+      const matches = html.match(/uddg=(https?[^&"]+)/gi) || []
+      let firstSite = ''
+      for (const m of matches) {
+        try {
+          const encoded = m.replace(/^uddg=/i, '')
+          const decoded = decodeURIComponent(encoded)
+          if (/duckduckgo|yandex/i.test(decoded)) continue
+          firstSite = new URL(decoded).origin
+          break
+        } catch {
+          /* next match */
+        }
+      }
+      return NextResponse.json({ pdfs: [], raw: firstSite })
+    }
 
     if (!brand || !site || typeof brand !== 'string' || typeof site !== 'string') {
       return NextResponse.json(
@@ -34,13 +75,7 @@ export async function POST(req: NextRequest) {
       try {
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=ru-ru`
         const response = await fetch(url, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
-            Referer: 'https://duckduckgo.com/',
-          },
+          headers: DDG_HEADERS,
         })
         const html = await response.text()
 
