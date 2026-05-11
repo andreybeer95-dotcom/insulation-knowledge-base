@@ -28,24 +28,27 @@ const SOURCES = [
     brand: 'ИЗОСПАН',
     manufacturer_id: null,
     name_ru: 'ИЗОСПАН',
-    doc_pages: [
-      'https://ispan.ru/catalog/',
-    ]
+    doc_pages: ['https://isospan.gexa.ru/'],
+    deep: true,
   },
   {
     brand: 'ОНДУТИС',
     manufacturer_id: null,
     name_ru: 'ОНДУТИС',
-    doc_pages: [
-      'https://ondutis.ru/catalog/',
-    ]
+    doc_pages: ['https://ondutiss.pro/'],
+    deep: true,
   },
   {
     brand: 'ПЕНЕТРОН',
     manufacturer_id: '2687b7ce-c178-4f81-a6c1-355fd82e6e08',
-    doc_pages: [
-      'https://penetron.ru/',
-    ]
+    doc_pages: ['https://penetron.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'BASWOOL',
+    manufacturer_id: 'c0f1731c-12a2-4d6a-bca3-6020711de7f5',
+    doc_pages: ['https://www.baswool.ru/catalog/'],
+    deep: true,
   },
   {
     brand: 'ТЕРМАФЛЕКС',
@@ -63,6 +66,71 @@ const SOURCES = [
     ]
   },
 ]
+
+async function crawlSiteForPDFs(page, startUrl, maxPages = 50) {
+  const visited = new Set()
+  const toVisit = [startUrl]
+  const foundPdfs = []
+  let domain
+  try {
+    domain = new URL(startUrl).hostname
+  } catch {
+    console.error(`  Некорректный startUrl: ${startUrl}`)
+    return []
+  }
+
+  while (toVisit.length > 0 && visited.size < maxPages) {
+    const url = toVisit.shift()
+    if (!url || visited.has(url)) continue
+    visited.add(url)
+
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      await page.waitForTimeout(1000)
+
+      const pdfs = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href]'))
+          .filter((a) => a.href.toLowerCase().includes('.pdf'))
+          .map((a) => ({
+            url: a.href,
+            title: a.textContent.trim() || a.href.split('/').pop(),
+          }))
+      })
+      foundPdfs.push(...pdfs)
+
+      const links = await page.evaluate((d) => {
+        return Array.from(document.querySelectorAll('a[href]'))
+          .map((a) => a.href)
+          .filter((href) => {
+            try {
+              const u = new URL(href)
+              return (
+                u.hostname === d &&
+                !href.includes('#') &&
+                !href.match(/\.(jpg|png|gif|css|js|zip|xml)$/i)
+              )
+            } catch {
+              return false
+            }
+          })
+      }, domain)
+
+      links.forEach((link) => {
+        if (!visited.has(link) && !toVisit.includes(link)) toVisit.push(link)
+      })
+
+      if (foundPdfs.length > 0) {
+        console.log(`  ${url}: найдено ${pdfs.length} PDF (всего: ${foundPdfs.length})`)
+      }
+    } catch {
+      /* skip failed pages */
+    }
+  }
+
+  const unique = Array.from(new Map(foundPdfs.map((p) => [p.url, p])).values())
+  console.log(`  Просканировано страниц: ${visited.size}, найдено PDF: ${unique.length}`)
+  return unique
+}
 
 async function scrapePageDeep(page, url) {
   console.log(`  Открываем: ${url}`)
@@ -228,7 +296,9 @@ async function main() {
 
     for (const docUrl of source.doc_pages) {
       try {
-        const pdfs = await scrapePageDeep(page, docUrl)
+        const pdfs = source.deep
+          ? await crawlSiteForPDFs(page, docUrl, 50)
+          : await scrapePageDeep(page, docUrl)
         allPDFs.push(...pdfs)
       } catch (e) {
         console.error(`  ❌ Ошибка: ${e.message}`)
@@ -250,4 +320,7 @@ async function main() {
   console.log('\n✅ Готово!')
 }
 
-main()
+main().catch((e) => {
+  console.error('Fatal:', e)
+  process.exit(1)
+})
