@@ -137,16 +137,34 @@ async function crawlSiteForPDFs(page, startUrl, maxPages = 50) {
     visited.add(url)
 
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-      await page.waitForTimeout(1000)
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 })
+      await page.waitForTimeout(2000)
 
       const pdfs = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('a[href]'))
-          .filter((a) => a.href.toLowerCase().includes('.pdf'))
-          .map((a) => ({
-            url: a.href,
-            title: a.textContent.trim() || a.href.split('/').pop(),
-          }))
+        const links = []
+
+        // Standard href links
+        document.querySelectorAll('a[href]').forEach((a) => {
+          if (a.href?.toLowerCase().includes('.pdf')) {
+            links.push({
+              url: a.href,
+              title: a.textContent.trim() || a.href.split('/').pop(),
+            })
+          }
+        })
+
+        // data-href, data-src, data-url attributes
+        document.querySelectorAll('[data-href],[data-src],[data-url]').forEach((el) => {
+          const url = el.dataset.href || el.dataset.src || el.dataset.url
+          if (url?.toLowerCase().includes('.pdf')) {
+            links.push({
+              url: url.startsWith('http') ? url : window.location.origin + url,
+              title: el.textContent.trim() || url.split('/').pop(),
+            })
+          }
+        })
+
+        return links
       })
       foundPdfs.push(...pdfs)
 
