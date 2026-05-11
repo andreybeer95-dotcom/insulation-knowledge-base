@@ -1,13 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 import { chromium } from 'playwright'
 import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-const SOURCES = [
+const BASE_SOURCES = [
   {
     brand: 'URSA',
     manufacturer_id: 'c281f409-592e-4404-abc0-9144cc046941',
@@ -66,6 +68,56 @@ const SOURCES = [
     ]
   },
 ]
+
+function mergeManufacturerSitesFromFile(baseSources) {
+  const jsonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'manufacturer-sites.json')
+  if (!fs.existsSync(jsonPath)) return baseSources
+  let rows
+  try {
+    rows = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'))
+  } catch {
+    return baseSources
+  }
+  if (!Array.isArray(rows)) return baseSources
+
+  const existingIds = new Set(baseSources.map((s) => s.manufacturer_id).filter(Boolean))
+  const existingBrands = new Set(baseSources.map((s) => s.brand))
+  const seenOrigins = new Set()
+  for (const s of baseSources) {
+    for (const p of s.doc_pages || []) {
+      try {
+        seenOrigins.add(new URL(p).origin)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const out = [...baseSources]
+  for (const row of rows) {
+    if (!row?.site || !row?.id || !row?.name) continue
+    let origin
+    try {
+      origin = new URL(row.site).origin
+    } catch {
+      continue
+    }
+    if (existingIds.has(row.id) || existingBrands.has(row.name)) continue
+    if (seenOrigins.has(origin)) continue
+    seenOrigins.add(origin)
+    existingIds.add(row.id)
+    existingBrands.add(row.name)
+    out.push({
+      brand: row.name,
+      manufacturer_id: row.id,
+      doc_pages: [row.site],
+      deep: true,
+    })
+  }
+  return out
+}
+
+const SOURCES = mergeManufacturerSitesFromFile(BASE_SOURCES)
 
 async function crawlSiteForPDFs(page, startUrl, maxPages = 50) {
   const visited = new Set()
@@ -284,11 +336,13 @@ async function saveToDB(pdfs, source) {
     }
   }
   console.log(`  ✅ Сохранено в БД: ${saved} новых документов`)
+  return saved
 }
 
 async function main() {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
+  const summary = []
 
   for (const source of SOURCES) {
     console.log(`\n📁 ${source.brand}`)
@@ -313,11 +367,14 @@ async function main() {
       'utf-8'
     )
 
-    if (unique.length > 0) await saveToDB(unique, source)
+    const saved = unique.length > 0 ? await saveToDB(unique, source) : 0
+    summary.push({ brand: source.brand, found: unique.length, saved })
   }
 
   await browser.close()
   console.log('\n✅ Готово!')
+  console.log('\nСводка (brand | PDF найдено | сохранено в БД):')
+  console.table(summary)
 }
 
 main().catch((e) => {
