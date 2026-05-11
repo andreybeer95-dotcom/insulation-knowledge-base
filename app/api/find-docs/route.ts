@@ -21,8 +21,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const siteKey = site.replace('www.', '')
-
     const queries = [
       `${brand} технический лист PDF`,
       `${brand} сертификат соответствия PDF`,
@@ -53,7 +51,7 @@ export async function POST(req: NextRequest) {
           try {
             const encoded = match.replace(/^uddg=/i, '')
             const decoded = decodeURIComponent(encoded)
-            if (decoded.toLowerCase().includes('.pdf') && decoded.includes(siteKey)) {
+            if (decoded.toLowerCase().includes('.pdf')) {
               pdfLinks.push(decoded)
             }
           } catch {
@@ -63,13 +61,23 @@ export async function POST(req: NextRequest) {
 
         const directPdfs = html.match(/https?:\/\/[^\s"'<>]+\.pdf/gi) || []
         directPdfs.forEach((u) => {
-          if (u.includes(siteKey)) pdfLinks.push(u)
+          pdfLinks.push(u)
         })
 
         if (qi === 0) {
           console.log('HTML length:', html.length)
           console.log('HTML sample:', html.substring(0, 500))
           console.log('Link matches:', linkMatches.length)
+          console.log(
+            'Sample uddg URLs:',
+            linkMatches.slice(0, 3).map((m) => {
+              try {
+                return decodeURIComponent(m.replace(/^uddg=/i, ''))
+              } catch {
+                return m
+              }
+            })
+          )
           console.log('PDF links found:', pdfLinks.length)
         }
 
