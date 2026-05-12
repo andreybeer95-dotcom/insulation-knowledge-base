@@ -153,51 +153,51 @@ const BASE_SOURCES = [
 ]
 
 function mergeManufacturerSitesFromFile(baseSources) {
-  const jsonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'manufacturer-sites.json')
-  if (!fs.existsSync(jsonPath)) return baseSources
-  let rows
-  try {
-    rows = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'))
-  } catch {
-    return baseSources
-  }
-  if (!Array.isArray(rows)) return baseSources
-
-  const existingIds = new Set(baseSources.map((s) => s.manufacturer_id).filter(Boolean))
   const existingBrands = new Set(baseSources.map((s) => s.brand))
-  const seenOrigins = new Set()
-  for (const s of baseSources) {
-    for (const p of s.doc_pages || []) {
-      try {
-        seenOrigins.add(new URL(p).origin)
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  const existingOrigins = new Set(
+    baseSources
+      .flatMap((s) =>
+        (s.doc_pages || []).map((u) => {
+          try {
+            return new URL(u).origin
+          } catch {
+            return null
+          }
+        })
+      )
+      .filter(Boolean)
+  )
 
-  const out = [...baseSources]
-  for (const row of rows) {
-    if (!row?.site || !row?.id || !row?.name) continue
+  let sites = []
+  try {
+    const filePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'manufacturer-sites.json')
+    sites = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch {
+    /* missing or invalid JSON */
+  }
+  if (!Array.isArray(sites)) sites = []
+
+  const added = []
+  for (const s of sites) {
+    if (!s?.site || !s?.name) continue
+    if (existingBrands.has(s.name)) continue
     let origin
     try {
-      origin = new URL(row.site).origin
+      origin = new URL(s.site).origin
     } catch {
       continue
     }
-    if (existingIds.has(row.id) || existingBrands.has(row.name)) continue
-    if (seenOrigins.has(origin)) continue
-    seenOrigins.add(origin)
-    existingIds.add(row.id)
-    existingBrands.add(row.name)
-    out.push({
-      brand: row.name,
-      manufacturer_id: row.id,
-      doc_pages: [row.site],
+    if (existingOrigins.has(origin)) continue
+    existingBrands.add(s.name)
+    existingOrigins.add(origin)
+    added.push({
+      brand: s.name,
+      manufacturer_id: s.id || null,
+      doc_pages: [s.site],
       deep: true,
     })
   }
-  return out
+  return [...baseSources, ...added]
 }
 
 const SOURCES = mergeManufacturerSitesFromFile(BASE_SOURCES)
