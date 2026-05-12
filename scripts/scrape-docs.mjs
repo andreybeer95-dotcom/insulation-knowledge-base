@@ -61,11 +61,94 @@ const BASE_SOURCES = [
     ]
   },
   {
+    brand: 'ВОЛМА',
+    manufacturer_id: 'bc281ae1-9ed0-48fb-8597-2587bc1a1774',
+    doc_pages: [
+      'https://www.volma.ru/customers/documentation/',
+      'https://www.volma.ru/production/catalog/',
+    ],
+    deep: true,
+  },
+  {
+    brand: 'ПАРОК',
+    manufacturer_id: '80aecc99-311b-4a0b-ab8c-01a90732054f',
+    doc_pages: [
+      'https://www.paroc.ru/downloads',
+      'https://www.paroc.ru/knowhow/documentation',
+    ],
+    deep: true,
+  },
+  {
+    brand: 'СТАРАТЕЛИ',
+    manufacturer_id: 'a21fba5b-c72d-4d71-84fd-da49cc522d53',
+    doc_pages: ['https://starateli.ru/documentation/', 'https://starateli.ru/catalog/'],
+    deep: true,
+  },
+  {
+    brand: 'ЮНИС',
+    manufacturer_id: 'bf03395b-841b-418b-bb84-1ba6813d3d4b',
+    doc_pages: ['https://unis.su/documentation/', 'https://unis.su/catalog/'],
+    deep: true,
+  },
+  {
+    brand: 'ПЕНОФОЛ',
+    manufacturer_id: '833160fb-1eee-4ac1-bb2c-934fff11bffd',
+    doc_pages: ['https://penofol.ru/dokumenty/'],
+    deep: true,
+  },
+  {
+    brand: 'ГЕРЛЕН',
+    manufacturer_id: 'b3d8d035-70ae-4931-98d3-f982faf350e5',
+    doc_pages: ['https://gerlen.ru/dokumenti/'],
+    deep: true,
+  },
+  {
     brand: 'ИМПЕР',
     manufacturer_id: 'f03dbf70-77b2-464b-892d-ba9ec14af826',
-    doc_pages: [
-      'https://tn.ru/catalog/gidroizolyatsiya/rulonnye-bitumnye-materialy/imper/',
-    ]
+    doc_pages: ['https://impergrant.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ОГНЕМАТ',
+    manufacturer_id: 'e5ba80ae-2f1b-437b-b933-243a1d9b52bd',
+    doc_pages: ['https://ognemat.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ШУМАНЕТ',
+    manufacturer_id: '5b248041-1e3f-4f20-8ba4-f0cce82398f4',
+    doc_pages: ['https://shumanet-shop.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ПЛАЗАС',
+    manufacturer_id: '49591b13-1bc0-465b-ab1a-6da452d8c543',
+    doc_pages: ['https://plazas.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ВИБРАФОМ',
+    manufacturer_id: '8fd29e78-e529-4cee-8f49-e3857478b9c9',
+    doc_pages: ['https://vibrafoam.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'СИЛЬВОМЕР',
+    manufacturer_id: 'cc49f6f5-e8b2-4c5f-98dc-8dea15ec49fa',
+    doc_pages: ['https://acoustic.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ТЕКС',
+    manufacturer_id: 'ab37f075-9060-45ab-9a7d-180afda9b390',
+    doc_pages: ['https://teks.ru/'],
+    deep: true,
+  },
+  {
+    brand: 'ДОРНИТ',
+    manufacturer_id: '69363ba6-e3d2-48af-988e-c0eadeca8804',
+    doc_pages: ['https://geotekstil-dornit.ru/'],
+    deep: true,
   },
 ]
 
@@ -153,15 +236,38 @@ async function crawlSiteForPDFs(page, startUrl, maxPages = 50) {
           }
         })
 
-        // data-href, data-src, data-url attributes
-        document.querySelectorAll('[data-href],[data-src],[data-url]').forEach((el) => {
-          const url = el.dataset.href || el.dataset.src || el.dataset.url
-          if (url?.toLowerCase().includes('.pdf')) {
-            links.push({
-              url: url.startsWith('http') ? url : window.location.origin + url,
-              title: el.textContent.trim() || url.split('/').pop(),
-            })
-          }
+        // onclick / data-* (absolute http(s) .pdf or relative /… .pdf)
+        document.querySelectorAll('[onclick],[data-file],[data-href],[data-src],[data-url]').forEach((el) => {
+          const attrs = [
+            el.getAttribute('onclick'),
+            el.getAttribute('data-file'),
+            el.getAttribute('data-href'),
+            el.getAttribute('data-src'),
+            el.getAttribute('data-url'),
+          ]
+          attrs.forEach((attr) => {
+            if (!attr || !attr.toLowerCase().includes('.pdf')) return
+            const match = attr.match(/https?:\/\/[^\s"']+\.pdf/i)
+            if (match) {
+              links.push({
+                url: match[0],
+                title: el.textContent.trim() || match[0].split('/').pop(),
+              })
+              return
+            }
+            const rel = attr.match(/(\/[^\s"'<>)]+\.pdf)/i)
+            if (rel) {
+              try {
+                const abs = new URL(rel[1], window.location.href).href
+                links.push({
+                  url: abs,
+                  title: el.textContent.trim() || rel[1].split('/').pop(),
+                })
+              } catch {
+                /* ignore */
+              }
+            }
+          })
         })
 
         return links
@@ -265,6 +371,37 @@ async function scrapePageDeep(page, url) {
         .filter((h) => h.toLowerCase().includes('.pdf'))
     })
     domLinks.forEach((l) => foundPdfs.add(l))
+
+    const attrPdfUrls = await page.evaluate(() => {
+      const urls = []
+      document.querySelectorAll('[onclick],[data-file],[data-href],[data-src],[data-url]').forEach((el) => {
+        const attrs = [
+          el.getAttribute('onclick'),
+          el.getAttribute('data-file'),
+          el.getAttribute('data-href'),
+          el.getAttribute('data-src'),
+          el.getAttribute('data-url'),
+        ]
+        attrs.forEach((attr) => {
+          if (!attr || !attr.toLowerCase().includes('.pdf')) return
+          const match = attr.match(/https?:\/\/[^\s"']+\.pdf/i)
+          if (match) {
+            urls.push(match[0])
+            return
+          }
+          const rel = attr.match(/(\/[^\s"'<>)]+\.pdf)/i)
+          if (rel) {
+            try {
+              urls.push(new URL(rel[1], window.location.href).href)
+            } catch {
+              /* ignore */
+            }
+          }
+        })
+      })
+      return urls
+    })
+    attrPdfUrls.forEach((u) => foundPdfs.add(u))
 
     const results = Array.from(foundPdfs).map((pdfUrl) => ({
       url: pdfUrl,
