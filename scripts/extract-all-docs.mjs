@@ -14,7 +14,7 @@ const { data: docs } = await supabase
   .select('id, title, file_url')
   .not('file_url', 'is', null)
   .is('extracted_text', null)
-  .limit(100)
+  .limit(1000)
 
 const docRows = docs ?? []
 console.log('Docs without extracted text:', docRows.length)

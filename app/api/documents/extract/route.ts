@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { extractTextWithOCR } from "@/lib/ocr";
 import { getServiceSupabase } from "@/lib/server-supabase";
 
 export const dynamic = "force-dynamic";
@@ -29,11 +30,25 @@ export async function POST(request: NextRequest) {
   const pdf = (await import("pdf-parse")).default;
   const parsed = await pdf(buffer);
 
+  let extractedText = parsed.text;
+
+  if (extractedText.trim().length < 100) {
+    try {
+      console.log("Text too short, trying Google Vision OCR...");
+      extractedText = await extractTextWithOCR(buffer);
+      console.log("Vision OCR result:", extractedText.length, "chars");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.log("Vision OCR failed:", message);
+      /* keep pdf-parse result */
+    }
+  }
+
   const { error } = await supabase
     .from("documents")
-    .update({ extracted_text: parsed.text })
+    .update({ extracted_text: extractedText })
     .eq("id", document_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  return NextResponse.json({ ok: true, chars: parsed.text.length });
+  return NextResponse.json({ ok: true, chars: extractedText.length });
 }
