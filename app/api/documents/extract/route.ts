@@ -13,7 +13,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "file_url and document_id are required" }, { status: 400 });
   }
 
-  const response = await fetch(file_url);
+  const response = await fetch(file_url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "application/pdf,*/*",
+      "Accept-Language": "ru-RU,ru;q=0.9",
+      Referer: "https://rwl.ru/",
+    },
+  });
   if (!response.ok) {
     return NextResponse.json({ error: "Unable to fetch file" }, { status: 400 });
   }
