@@ -22,9 +22,9 @@ const BASE_SOURCES = [
   {
     brand: 'ROCKWOOL',
     manufacturer_id: '6f22e435-08cc-46ab-ba45-d119ce497581',
-    doc_pages: [
-      'https://rwl.ru/resources-and-tools/docs/',
-    ]
+    doc_pages: ['https://rwl.ru/dokumentatsiya/'],
+    deep: false,
+    intercept_network: true,
   },
   {
     brand: 'ИЗОСПАН',
@@ -418,6 +418,174 @@ async function scrapePageDeep(page, url) {
   }
 }
 
+async function scrapeWithNetworkIntercept(page, url, domain) {
+  const interceptedPdfs = new Set()
+
+  const onResponse = async (response) => {
+    try {
+      const resUrl = response.url()
+      const status = response.status()
+      if (resUrl.includes('rwl.ru')) {
+        console.log(`  Response: ${status} ${resUrl.substring(0, 100)}`)
+      }
+      if (resUrl.toLowerCase().includes('.pdf')) {
+        interceptedPdfs.add(resUrl)
+      }
+      const ct = response.headers()['content-type'] || ''
+
+      if (resUrl.includes('ajax.php') && resUrl.includes('getDocuments')) {
+        try {
+          const text = await response.text()
+          console.log('  getDocuments API response (first 500 chars):', text.substring(0, 500))
+          const data = JSON.parse(text)
+          if (data?.data?.items) {
+            for (const item of data.data.items) {
+              if (item.URL && item.URL.includes('.pdf')) {
+                interceptedPdfs.add(`https://${domain}${item.URL}`)
+                console.log('  Found PDF in API:', item.URL)
+              } else if (item.FILE_URL && item.FILE_URL.toLowerCase().includes('.pdf')) {
+                interceptedPdfs.add(`https://${domain}${item.FILE_URL}`)
+                console.log('  Found PDF in API:', item.FILE_URL)
+              }
+            }
+          }
+        } catch (e) {
+          console.log('  getDocuments parse error:', e.message)
+        }
+        return
+      }
+
+      if (ct.includes('json') && response.status() === 200) {
+        const text = await response.text()
+        const matches = text.match(/https?:\/\/[^\s"'\\]+\.pdf/gi) || []
+        matches.forEach((m) => interceptedPdfs.add(m))
+        const bitrixMatches = text.match(/"FILE_PATH":"([^"]+\.pdf)"/gi) || []
+        bitrixMatches.forEach((m) => {
+          const path = m.match(/"FILE_PATH":"([^"]+\.pdf)"/i)?.[1]
+          if (path) {
+            if (path.startsWith('http')) {
+              interceptedPdfs.add(path)
+            } else if (path.startsWith('/')) {
+              interceptedPdfs.add(`https://${domain}${path}`)
+            }
+          }
+        })
+        const relMatches = text.match(/"(\/[^"]*\.pdf)"/gi) || []
+        relMatches.forEach((m) => {
+          const path = m.replace(/"/g, '')
+          if (path.startsWith('/')) {
+            interceptedPdfs.add(`https://${domain}${path}`)
+          }
+        })
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  page.on('response', onResponse)
+
+  try {
+    console.log(`  Перехват сети: ${url}`)
+    await page.setExtraHTTPHeaders({
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      Referer: 'https://www.google.com/',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Upgrade-Insecure-Requests': '1',
+    })
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 })
+    await page.waitForTimeout(5000)
+
+    try {
+      const selectAll = await page.$(
+        'button:has-text("Выбрать все"), .select-all, [class*="select-all"]'
+      )
+      if (selectAll) {
+        await selectAll.click()
+        await page.waitForTimeout(3000)
+        console.log('  Clicked Выбрать все')
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const searchBtn = await page.$(
+        '.search-btn, button[type="submit"], [class*="search"] button'
+      )
+      if (searchBtn) {
+        await searchBtn.click()
+        await page.waitForTimeout(3000)
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const cookieBtn = await page.$(
+        'button:has-text("СОГЛАСЕН"), [class*="cookie"] button'
+      )
+      if (cookieBtn) {
+        await cookieBtn.click()
+        await page.waitForTimeout(1000)
+      }
+    } catch {
+      /* ignore */
+    }
+
+    let loadMoreClicks = 0
+    for (let i = 0; i < 50; i++) {
+      try {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        await page.waitForTimeout(1000)
+
+        const loadMore = await page.$(
+          'button:has-text("ПОКАЗАТЬ ЕЩЁ"), button:has-text("Показать еще"), button:has-text("Ещё"), [class*="load-more"]'
+        )
+        if (!loadMore) break
+
+        const isVisible = await loadMore.isVisible()
+        if (!isVisible) break
+
+        await loadMore.click()
+        loadMoreClicks++
+        console.log(`  Clicked ПОКАЗАТЬ ЕЩЁ (${loadMoreClicks})`)
+        await page.waitForTimeout(2000)
+      } catch {
+        break
+      }
+    }
+    console.log(`  Total load more clicks: ${loadMoreClicks}`)
+
+    const domPdfs = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a[href]'))
+        .filter((a) => a.href.toLowerCase().includes('.pdf'))
+        .map((a) => a.href)
+    })
+    domPdfs.forEach((u) => interceptedPdfs.add(u))
+
+    console.log(`  Перехвачено PDF: ${interceptedPdfs.size}`)
+
+    const results = Array.from(interceptedPdfs).map((pdfUrl) => ({
+      url: pdfUrl,
+      title: pdfUrl.split('/').pop().replace(/\.pdf/i, '').replace(/-/g, ' '),
+    }))
+
+    return results
+  } catch (e) {
+    console.error(`  ❌ scrapeWithNetworkIntercept: ${e.message}`)
+    return []
+  } finally {
+    page.off('response', onResponse)
+  }
+}
+
 async function saveToDB(pdfs, source) {
   function detectDocType(title) {
     const t = title.toLowerCase()
@@ -484,37 +652,60 @@ async function saveToDB(pdfs, source) {
     }
 
     if (error) {
+      console.log('  DB error:', error.message)
       console.error(`  ❌ INSERT error: ${JSON.stringify(error)}`)
     } else {
       saved++
       console.log(`  ✅ ${title}`)
     }
   }
+  console.log(`  DB insert result: attempted ${pdfs.length} rows`)
   console.log(`  ✅ Сохранено в БД: ${saved} новых документов`)
   return saved
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+  })
+  const context = await browser.newContext({
+    viewport: { width: 1920, height: 1080 },
+    locale: 'ru-RU',
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  })
+  const page = await context.newPage()
   const summary = []
 
   for (const source of SOURCES) {
     console.log(`\n📁 ${source.brand}`)
     const allPDFs = []
 
-    for (const docUrl of source.doc_pages) {
+    if (source.intercept_network) {
       try {
-        const pdfs = source.deep
-          ? await crawlSiteForPDFs(page, docUrl, 50)
-          : await scrapePageDeep(page, docUrl)
+        const startUrl = source.doc_pages?.[0]
+        if (!startUrl) throw new Error('intercept_network requires doc_pages[0]')
+        const pdfs = await scrapeWithNetworkIntercept(page, startUrl, 'rwl.ru')
         allPDFs.push(...pdfs)
       } catch (e) {
         console.error(`  ❌ Ошибка: ${e.message}`)
       }
+    } else {
+      for (const docUrl of source.doc_pages) {
+        try {
+          const pdfs = source.deep
+            ? await crawlSiteForPDFs(page, docUrl, 50)
+            : await scrapePageDeep(page, docUrl)
+          allPDFs.push(...pdfs)
+        } catch (e) {
+          console.error(`  ❌ Ошибка: ${e.message}`)
+        }
+      }
     }
 
     const unique = Array.from(new Map(allPDFs.map((p) => [p.url, p])).values())
+    console.log('  Saving sample URLs:', unique.slice(0, 3).map((p) => p.url))
 
     fs.writeFileSync(
       `scripts/found-docs-${source.brand}.json`,
@@ -526,6 +717,7 @@ async function main() {
     summary.push({ brand: source.brand, found: unique.length, saved })
   }
 
+  await context.close()
   await browser.close()
   console.log('\n✅ Готово!')
   console.log('\nСводка (brand | PDF найдено | сохранено в БД):')
