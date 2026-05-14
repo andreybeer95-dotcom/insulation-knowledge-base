@@ -216,6 +216,15 @@ export async function GET(request: NextRequest) {
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
 
+  // Приоритет брендов для подбора (когда нет конкретного бренда в запросе)
+  // Порядок = приоритет предложения менеджеру
+  const BRAND_PRIORITY = [
+    'c0f1731c-12a2-4d6a-bca3-6020711de7f5', // BASWOOL - первый приоритет
+    '6f22e435-08cc-46ab-ba45-d119ce497581', // ROCKWOOL
+    'f5fc0110-8057-47fd-9811-9aa1a2e81d8b', // ТЕХНОНИКОЛЬ - только XPS и гидроизоляция
+    'f7fac0e0-a00c-4ef0-a456-bc8b097c1204', // ИКОПАЛ
+    '80a19db2-d3ea-4b84-84b5-3369e7633a6e', // ЦЕРЕЗИТ
+  ]
   let detectedManufacturerId: string | null = null;
   for (const [kw, id] of Object.entries(manufacturerMap)) {
     if (queryLowerRaw.includes(kw)) {
@@ -395,6 +404,7 @@ export async function GET(request: NextRequest) {
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
       chunks_count:   chunks.length,
+      brand_priority: BRAND_PRIORITY,
     },
   })
 }
@@ -650,6 +660,14 @@ function buildContext(
   chunks: ChunkRow[]
 ): string {
   const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
+  lines.push('## Приоритет брендов для предложения менеджеру')
+  lines.push('1. BASWOOL — основной контракт, предлагать ПЕРВЫМ для минваты')
+  lines.push('2. ROCKWOOL — второй приоритет для минваты')
+  lines.push('3. ТЕХНОНИКОЛЬ — только XPS экструзия и гидроизоляция (НЕ минвата)')
+  lines.push('4. ИКОПАЛ — гидроизоляция')
+  lines.push('5. ЦЕРЕЗИТ/ОСНОВИТ/ПЛИТОНИТ — сухие смеси и клеи')
+  lines.push('⚠️ ВАЖНО: Всегда предлагать сопутствующие товары: мембрана + крепёж + анкера')
+  lines.push('')
 
   // Чанки — с новыми полями приоритета и типа документа
   if (chunks.length) {

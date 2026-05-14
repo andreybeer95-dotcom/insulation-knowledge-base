@@ -97,6 +97,12 @@ const BASE_SOURCES = [
     deep: true,
   },
   {
+    brand: 'ПЕНОПЛЭКС',
+    manufacturer_id: '4584f447-4178-4757-901a-00f38614c381',
+    doc_pages: ['https://www.penoplex.ru/upload/document/'],
+    deep: false,
+  },
+  {
     brand: 'ГЕРЛЕН',
     manufacturer_id: 'b3d8d035-70ae-4931-98d3-f982faf350e5',
     doc_pages: ['https://gerlen.ru/dokumenti/'],
@@ -150,6 +156,36 @@ const BASE_SOURCES = [
     doc_pages: ['https://geotekstil-dornit.ru/'],
     deep: true,
   },
+  {
+    brand: 'КНАУФ',
+    manufacturer_id: 'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c',
+    doc_pages: ['https://www.knauf.ru/documents/all-documents/'],
+    deep: false,
+  },
+  {
+    brand: 'HOTROCK',
+    manufacturer_id: '4bdf5e83-5b51-4e91-8edf-5cef85bd5560',
+    doc_pages: [
+      'http://hotrock.ru/wp-content/uploads/2023/11/',
+      'http://hotrock.ru/dokumentacziya/',
+    ],
+    deep: false,
+  },
+  {
+    brand: 'ЗИКА',
+    manufacturer_id: '7fd8b297-1990-4366-836f-113985a0cd91',
+    doc_pages: ['https://rus.sika.com/service/documents/'],
+    deep: false,
+  },
+  {
+    brand: 'PRO-МБОР',
+    manufacturer_id: 'c2b8ab7c-79a8-40dd-882a-07e1f591de8d',
+    doc_pages: [
+      'https://pro-mbor.ru/wp-content/uploads/2020/03/',
+      'https://pro-mbor.ru/documentation/',
+    ],
+    deep: false,
+  },
 ]
 
 function mergeManufacturerSitesFromFile(baseSources) {
@@ -200,7 +236,13 @@ function mergeManufacturerSitesFromFile(baseSources) {
   return [...baseSources, ...added]
 }
 
-const SOURCES = mergeManufacturerSitesFromFile(BASE_SOURCES)
+/** Must match `brand` in BASE_SOURCES or `name` in manufacturer-sites.json (nomenclature_1c). */
+const PRIORITY_BRANDS = ['КНАУФ', 'HOTROCK', 'ПАРОК', 'PRO-МБОР', 'ЗИКА', 'ПЕНОПЛЭКС']
+
+const SOURCES = mergeManufacturerSitesFromFile(BASE_SOURCES).filter((s) =>
+  PRIORITY_BRANDS.includes(s.brand)
+)
+console.log('Running for brands:', SOURCES.map((s) => s.brand))
 
 async function crawlSiteForPDFs(page, startUrl, maxPages = 50) {
   const visited = new Set()
