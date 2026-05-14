@@ -332,6 +332,29 @@ export async function GET(request: NextRequest) {
     products = data ?? []
   }
 
+  let relevant_nomenclature: {
+    id: string
+    code: string | null
+    article: string | null
+    name: string | null
+    brand: string | null
+  }[] = []
+
+  if (queryNumbers.length > 0) {
+    let nomQuery = supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .limit(20)
+
+    const nomFilters = allKeywords.map((k) => `name.ilike.%${k}%`).join(',')
+    if (nomFilters) {
+      nomQuery = nomQuery.or(nomFilters)
+    }
+
+    const { data: nomData } = await nomQuery
+    relevant_nomenclature = nomData ?? []
+  }
+
   // ─── параллельные запросы ─────────────────────────────────
   const [rulesRes, notesRes, chunksRes] = await Promise.allSettled([
 
@@ -385,7 +408,7 @@ export async function GET(request: NextRequest) {
     ? relevantRules
     : allRules.filter(r => r.is_prohibition);
 
-  let formattedContext = buildContext(query, products, rules, notes, chunks)
+  let formattedContext = buildContext(query, products, rules, notes, chunks, relevant_nomenclature)
   if (applicable_rules.length > 0) {
     const rulesText = applicable_rules
       .map(r => `${r.is_prohibition ? '🚫 ЗАПРЕТ' : '📋 ПРАВИЛО'}: ${r.rule_name}\n${r.rule_text}`)
@@ -399,12 +422,14 @@ export async function GET(request: NextRequest) {
     filters: { product_id, category_id, intent_tags, doc_types: doc_types_arr },
     detected: detectContext(query),
     relevant_products: products,
+    relevant_nomenclature,
     applicable_rules,
     relevant_notes: notes,
     document_chunks: chunks,
     formatted_context: formattedContext,
     meta: {
       products_count: products.length,
+      nomenclature_count: relevant_nomenclature.length,
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
       chunks_count:   chunks.length,
@@ -661,7 +686,8 @@ function buildContext(
   products: any[],
   rules: any[],
   notes: any[],
-  chunks: ChunkRow[]
+  chunks: ChunkRow[],
+  nomenclature: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = []
 ): string {
   const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
   lines.push('## Приоритет брендов для предложения менеджеру')
@@ -717,6 +743,15 @@ function buildContext(
         `- **${p.name}** (${p.kod_1c ?? '—'}) | ${p.flammability} | T до ${p.temp_max}°C` +
         `${coating}${density}${thick} | ДУ ${p.diameter_min}–${p.diameter_max}${stock}`
       )
+    }
+    lines.push('')
+  }
+
+  if (nomenclature.length) {
+    lines.push('## Номенклатура 1С')
+    for (const n of nomenclature) {
+      const articlePart = n.article ? ` (article: ${n.article})` : ''
+      lines.push(`- **${n.name ?? '—'}**${articlePart}`)
     }
     lines.push('')
   }
