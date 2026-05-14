@@ -250,6 +250,10 @@ export async function GET(request: NextRequest) {
     .map(w => w.toLowerCase().trim())
     .filter(w => w.length > 3 && !STOP_WORDS.includes(w))
 
+  // Extract numbers from rawQuery for product filtering
+  const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
+  const allKeywords = [...meaningfulKeywords, ...queryNumbers]
+
   // Продукты: сначала производитель + ключевые слова, потом fallback на производителя
   let products: any[] = []
   if (product_id) {
@@ -264,7 +268,7 @@ export async function GET(request: NextRequest) {
       `)
       .eq('id', product_id)
       .eq('in_stock', true)
-      .limit(20)
+      .limit(30)
     products = data ?? []
   } else if (detectedManufacturerId) {
     let keywordQuery = supabase
@@ -278,11 +282,11 @@ export async function GET(request: NextRequest) {
       `)
       .eq('manufacturer_id', detectedManufacturerId)
       .eq('in_stock', true)
-      .limit(20)
+      .limit(30)
 
-    if (meaningfulKeywords.length > 0) {
+    if (allKeywords.length > 0) {
       keywordQuery = keywordQuery.or(
-        meaningfulKeywords.map(kw => `name.ilike.%${kw}%`).join(',')
+        allKeywords.map((k) => `name.ilike.%${k}%`).join(',')
       )
     }
 
@@ -302,7 +306,7 @@ export async function GET(request: NextRequest) {
         `)
         .eq('manufacturer_id', detectedManufacturerId)
         .eq('in_stock', true)
-        .limit(20)
+        .limit(30)
       products = fallbackProducts ?? []
     }
   } else {
@@ -316,11 +320,11 @@ export async function GET(request: NextRequest) {
         category_id, categories(name, full_path)
       `)
       .eq('in_stock', true)
-      .limit(20)
+      .limit(30)
 
-    if (meaningfulKeywords.length > 0) {
+    if (allKeywords.length > 0) {
       genericQuery = genericQuery.or(
-        meaningfulKeywords.map(kw => `name.ilike.%${kw}%`).join(',')
+        allKeywords.map((k) => `name.ilike.%${k}%`).join(',')
       )
     }
 
