@@ -505,6 +505,32 @@ export async function GET(request: NextRequest) {
         }
       }
       const relatedNomenclature = Array.from(relatedById.values())
+      let accessoryCandidateNomenclature = relatedNomenclature
+      if (nomBrand) {
+        const [accessoryByNameRes, accessoryByArticleRes] = await Promise.all([
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .eq('brand', nomBrand)
+            .ilike('name', `%${firstSize}%`)
+            .ilike('name', `%${secondSize}%`)
+            .limit(800),
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .eq('brand', nomBrand)
+            .ilike('article', `%${firstSize}%`)
+            .ilike('article', `%${secondSize}%`)
+            .limit(800),
+        ])
+        const accessoryById = new Map<string, NomenclatureItem>()
+        for (const item of ([...(accessoryByNameRes.data ?? []), ...(accessoryByArticleRes.data ?? [])] as NomenclatureItem[])) {
+          if (hasExactSize(item, firstSize, secondSize)) {
+            accessoryById.set(item.id, item)
+          }
+        }
+        accessoryCandidateNomenclature = Array.from(accessoryById.values())
+      }
       let analogCandidateNomenclature = relatedNomenclature
       if (nomBrand) {
         const [analogByNameRes, analogByArticleRes] = await Promise.all([
@@ -533,7 +559,7 @@ export async function GET(request: NextRequest) {
       }
       const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
 
-      nomenclature_accessories = relatedNomenclature
+      nomenclature_accessories = accessoryCandidateNomenclature
         .filter((item) => !relevantIds.has(item.id))
         .filter((item) => isNomenclatureAccessory(item.name))
         .slice(0, 20)
