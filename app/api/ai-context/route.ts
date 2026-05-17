@@ -371,14 +371,18 @@ export async function GET(request: NextRequest) {
     if (queryNumbers.length >= 2) {
       const [firstSize, secondSize] = queryNumbers
       const sizeFilters = [
-        `name.ilike.%${firstSize}x${secondSize}%`,
-        `name.ilike.%${firstSize}х${secondSize}%`,
-        `name.ilike.%${firstSize}*${secondSize}%`,
-        `name.ilike.%${firstSize}-${secondSize}%`,
-        `name.ilike.%${secondSize}x${firstSize}%`,
-        `name.ilike.%${secondSize}х${firstSize}%`,
-        `name.ilike.%${secondSize}*${firstSize}%`,
-        `name.ilike.%${secondSize}-${firstSize}%`,
+        `name.ilike.% ${firstSize}x${secondSize}%`,
+        `name.ilike.% ${firstSize}х${secondSize}%`,
+        `name.ilike.% ${firstSize}*${secondSize}%`,
+        `name.ilike.% ${firstSize}-${secondSize}%`,
+        `name.ilike.%(${firstSize}x${secondSize}%`,
+        `name.ilike.%(${firstSize}х${secondSize}%`,
+        `name.ilike.%(${firstSize}*${secondSize}%`,
+        `name.ilike.%(${firstSize}-${secondSize}%`,
+        `article.ilike.%${firstSize}-${secondSize}%`,
+        `article.ilike.%${firstSize}x${secondSize}%`,
+        `article.ilike.%${firstSize}х${secondSize}%`,
+        `article.ilike.%${firstSize}*${secondSize}%`,
       ].join(',')
 
       nomQuery = nomQuery.or(sizeFilters)
