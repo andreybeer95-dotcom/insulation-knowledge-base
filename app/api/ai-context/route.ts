@@ -230,6 +230,33 @@ export async function GET(request: NextRequest) {
     '4bdf5e83-5b51-4e91-8edf-5cef85bd5560': 'HOTROCK',
   }
 
+  const nomenclatureBrandKeywordMap: Record<string, string> = {
+    'xotpipe': 'XOTPIPE',
+    'хотпайп': 'XOTPIPE',
+    'экоролл': 'ЭКОРОЛЛ',
+    'ekoroll': 'ЭКОРОЛЛ',
+    'rockwool': 'ROCKWOOL',
+    'роквул': 'ROCKWOOL',
+    'baswool': 'BASWOOL',
+    'басвул': 'BASWOOL',
+    'технониколь': 'ТЕХНОНИКОЛЬ',
+    'technonicol': 'ТЕХНОНИКОЛЬ',
+    'икопал': 'ИКОПАЛ',
+    'icopal': 'ИКОПАЛ',
+    'k-flex': 'K-FLEX',
+    'kflex': 'K-FLEX',
+    'к-флекс': 'K-FLEX',
+    'кфлекс': 'K-FLEX',
+    'кнауф': 'КНАУФ',
+    'knauf': 'КНАУФ',
+    'пеноплэкс': 'ПЕНОПЛЭКС',
+    'penoplex': 'ПЕНОПЛЭКС',
+    'hotrock': 'HOTROCK',
+    'хотрок': 'HOTROCK',
+    'дорнит': 'ДОРНИТ',
+    'армостаб': 'АРМОСТАБ',
+  }
+
   // Приоритет брендов для подбора (когда нет конкретного бренда в запросе)
   // Порядок = приоритет предложения менеджеру
   const BRAND_PRIORITY = [
@@ -360,10 +387,13 @@ export async function GET(request: NextRequest) {
       .select('id, code, article, name, brand')
       .limit(20)
 
+    const nomBrandFromKeyword = Object.entries(nomenclatureBrandKeywordMap)
+      .find(([kw]) => queryLowerRaw.includes(kw))?.[1]
+
     const nomBrand =
       detectedManufacturerId && brandNameMap[detectedManufacturerId]
         ? brandNameMap[detectedManufacturerId]
-        : undefined
+        : nomBrandFromKeyword
     if (nomBrand) {
       nomQuery = nomQuery.eq('brand', nomBrand)
     }
@@ -387,10 +417,29 @@ export async function GET(request: NextRequest) {
 
       nomQuery = nomQuery.or(sizeFilters)
     } else {
-      const nomFilters = queryNumbers.map((k) => `name.ilike.%${k}%`).join(',')
+      const nomFilters = queryNumbers.flatMap((k) => [
+        `name.ilike.% ${k} %`,
+        `name.ilike.% ${k}мм%`,
+        `name.ilike.% ${k} мм%`,
+        `name.ilike.%*${k} %`,
+        `name.ilike.%*${k})%`,
+        `name.ilike.%*${k}(%`,
+        `name.ilike.%*${k},%`,
+        `name.ilike.%x${k} %`,
+        `name.ilike.%x${k})%`,
+        `name.ilike.%х${k} %`,
+        `name.ilike.%х${k})%`,
+        `name.ilike.%-${k} %`,
+        `name.ilike.%-${k})%`,
+        `article.ilike.%${k}%`,
+      ]).join(',')
       if (nomFilters) {
         nomQuery = nomQuery.or(nomFilters)
       }
+    }
+
+    if (/геотекст|геоткан|дорнит/i.test(rawQuery)) {
+      nomQuery = nomQuery.ilike('name', '%геотекст%')
     }
 
     const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery)
