@@ -373,13 +373,43 @@ export async function GET(request: NextRequest) {
     products = data ?? []
   }
 
-  let relevant_nomenclature: {
+  type NomenclatureItem = {
     id: string
     code: string | null
     article: string | null
     name: string | null
     brand: string | null
-  }[] = []
+  }
+
+  let relevant_nomenclature: NomenclatureItem[] = []
+  let nomenclature_analogs: NomenclatureItem[] = []
+  let nomenclature_accessories: NomenclatureItem[] = []
+
+  const getNomenclatureItemType = (name?: string | null) => {
+    const lower = (name || '').toLowerCase()
+    if (/цилиндр|скорлуп/i.test(lower)) return 'cylinder'
+    if (/заглуш|пробк/i.test(lower)) return 'end_cap'
+    if (/отвод|колено/i.test(lower)) return 'elbow'
+    if (/тройник/i.test(lower)) return 'tee'
+    if (/переход/i.test(lower)) return 'transition'
+    if (/сегмент/i.test(lower)) return 'segment'
+    return 'other'
+  }
+
+  const isNomenclatureAccessory = (name?: string | null) =>
+    ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
+
+  const getSizeFilters = (firstSize: string, secondSize: string) => [
+    `name.ilike.% ${firstSize}x${secondSize}%`,
+    `name.ilike.% ${firstSize}х${secondSize}%`,
+    `name.ilike.% ${firstSize}-${secondSize}%`,
+    `name.ilike.%(${firstSize}x${secondSize}%`,
+    `name.ilike.%(${firstSize}х${secondSize}%`,
+    `name.ilike.%(${firstSize}-${secondSize}%`,
+    `article.ilike.%${firstSize}-${secondSize}%`,
+    `article.ilike.%${firstSize}x${secondSize}%`,
+    `article.ilike.%${firstSize}х${secondSize}%`,
+  ]
 
   if (queryNumbers.length > 0) {
     let nomQuery = supabase
@@ -400,17 +430,7 @@ export async function GET(request: NextRequest) {
 
     if (queryNumbers.length >= 2) {
       const [firstSize, secondSize] = queryNumbers
-      const sizeFilters = [
-        `name.ilike.% ${firstSize}x${secondSize}%`,
-        `name.ilike.% ${firstSize}х${secondSize}%`,
-        `name.ilike.% ${firstSize}-${secondSize}%`,
-        `name.ilike.%(${firstSize}x${secondSize}%`,
-        `name.ilike.%(${firstSize}х${secondSize}%`,
-        `name.ilike.%(${firstSize}-${secondSize}%`,
-        `article.ilike.%${firstSize}-${secondSize}%`,
-        `article.ilike.%${firstSize}x${secondSize}%`,
-        `article.ilike.%${firstSize}х${secondSize}%`,
-      ].join(',')
+      const sizeFilters = getSizeFilters(firstSize, secondSize).join(',')
 
       nomQuery = nomQuery.or(sizeFilters)
     } else {
@@ -454,6 +474,34 @@ export async function GET(request: NextRequest) {
 
     const { data: nomData } = await nomQuery
     relevant_nomenclature = nomData ?? []
+
+    if (queryNumbers.length >= 2) {
+      const [firstSize, secondSize] = queryNumbers
+      const { data: relatedData } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or(getSizeFilters(firstSize, secondSize).join(','))
+        .limit(160)
+
+      const relatedNomenclature = (relatedData ?? []) as NomenclatureItem[]
+      const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
+
+      nomenclature_accessories = relatedNomenclature
+        .filter((item) => !relevantIds.has(item.id))
+        .filter((item) => isNomenclatureAccessory(item.name))
+        .slice(0, 20)
+
+      const needsCylinderAnalogs =
+        relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder') ||
+        /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+
+      if (needsCylinderAnalogs) {
+        nomenclature_analogs = relatedNomenclature
+          .filter((item) => !relevantIds.has(item.id))
+          .filter((item) => getNomenclatureItemType(item.name) === 'cylinder')
+          .slice(0, 20)
+      }
+    }
   }
 
   // ─── параллельные запросы ─────────────────────────────────
@@ -509,7 +557,16 @@ export async function GET(request: NextRequest) {
     ? relevantRules
     : allRules.filter(r => r.is_prohibition);
 
-  let formattedContext = buildContext(query, products, rules, notes, chunks, relevant_nomenclature)
+  let formattedContext = buildContext(
+    query,
+    products,
+    rules,
+    notes,
+    chunks,
+    relevant_nomenclature,
+    nomenclature_analogs,
+    nomenclature_accessories
+  )
   if (applicable_rules.length > 0) {
     const rulesText = applicable_rules
       .map(r => `${r.is_prohibition ? '🚫 ЗАПРЕТ' : '📋 ПРАВИЛО'}: ${r.rule_name}\n${r.rule_text}`)
@@ -524,6 +581,8 @@ export async function GET(request: NextRequest) {
     detected: detectContext(query),
     relevant_products: products,
     relevant_nomenclature,
+    nomenclature_analogs,
+    nomenclature_accessories,
     applicable_rules,
     relevant_notes: notes,
     document_chunks: chunks,
@@ -531,6 +590,8 @@ export async function GET(request: NextRequest) {
     meta: {
       products_count: products.length,
       nomenclature_count: relevant_nomenclature.length,
+      nomenclature_analogs_count: nomenclature_analogs.length,
+      nomenclature_accessories_count: nomenclature_accessories.length,
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
       chunks_count:   chunks.length,
@@ -788,7 +849,9 @@ function buildContext(
   rules: any[],
   notes: any[],
   chunks: ChunkRow[],
-  nomenclature: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = []
+  nomenclature: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = [],
+  nomenclatureAnalogs: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = [],
+  nomenclatureAccessories: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = []
 ): string {
   const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
   lines.push('## Приоритет брендов для предложения менеджеру')
@@ -853,6 +916,26 @@ function buildContext(
     for (const n of nomenclature) {
       const articlePart = n.article ? ` (article: ${n.article})` : ''
       lines.push(`- **${n.name ?? '—'}**${articlePart}`)
+    }
+    lines.push('')
+  }
+
+  if (nomenclatureAnalogs.length) {
+    lines.push('## Аналоги из номенклатуры 1С')
+    for (const n of nomenclatureAnalogs) {
+      const articlePart = n.article ? ` (article: ${n.article})` : ''
+      const brandPart = n.brand ? ` | ${n.brand}` : ''
+      lines.push(`- **${n.name ?? '—'}**${articlePart}${brandPart}`)
+    }
+    lines.push('')
+  }
+
+  if (nomenclatureAccessories.length) {
+    lines.push('## Сопутствующие товары / аксессуары 1С')
+    for (const n of nomenclatureAccessories) {
+      const articlePart = n.article ? ` (article: ${n.article})` : ''
+      const brandPart = n.brand ? ` | ${n.brand}` : ''
+      lines.push(`- **${n.name ?? '—'}**${articlePart}${brandPart}`)
     }
     lines.push('')
   }
