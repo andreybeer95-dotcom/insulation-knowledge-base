@@ -368,9 +368,30 @@ export async function GET(request: NextRequest) {
       nomQuery = nomQuery.eq('brand', nomBrand)
     }
 
-    const nomFilters = queryNumbers.map((k) => `name.ilike.%${k}%`).join(',')
-    if (nomFilters) {
-      nomQuery = nomQuery.or(nomFilters)
+    if (queryNumbers.length >= 2) {
+      const [firstSize, secondSize] = queryNumbers
+      const sizeFilters = [
+        `name.ilike.%${firstSize}x${secondSize}%`,
+        `name.ilike.%${firstSize}х${secondSize}%`,
+        `name.ilike.%${firstSize}*${secondSize}%`,
+        `name.ilike.%${firstSize}-${secondSize}%`,
+        `name.ilike.%${secondSize}x${firstSize}%`,
+        `name.ilike.%${secondSize}х${firstSize}%`,
+        `name.ilike.%${secondSize}*${firstSize}%`,
+        `name.ilike.%${secondSize}-${firstSize}%`,
+      ].join(',')
+
+      nomQuery = nomQuery.or(sizeFilters)
+    } else {
+      const nomFilters = queryNumbers.map((k) => `name.ilike.%${k}%`).join(',')
+      if (nomFilters) {
+        nomQuery = nomQuery.or(nomFilters)
+      }
+    }
+
+    const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery)
+    if (isCylinderQuery) {
+      nomQuery = nomQuery.ilike('name', '%цилиндр%')
     }
 
     const { data: nomData } = await nomQuery
