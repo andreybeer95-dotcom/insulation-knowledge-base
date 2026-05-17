@@ -630,6 +630,53 @@ export async function GET(request: NextRequest) {
     ? relevantRules
     : allRules.filter(r => r.is_prohibition);
 
+  const selection_guidance = {
+    clarification_needed: false,
+    questions: [] as string[],
+    evidence_policy: [
+      'Не придумывать технические характеристики. Использовать только selection_rules и document_chunks из официальных техлистов/документов производителя.',
+      'Если в контексте нет правила или официального техлиста под ситуацию клиента, нужно написать: требуется уточнение/проверка по техлисту производителя.',
+      'Размер номенклатуры является фильтром, но не достаточным основанием для рекомендации аналога или аксессуара.',
+      'Аксессуары предлагать только после понимания решения: где применяется материал, для чего, какие условия эксплуатации и какой тип покрытия/системы нужен.',
+    ],
+    recommendation_status: 'candidate_context_only',
+  }
+
+  const hasUseCaseInQuery = /улиц|помещ|труб|отопл|хвс|гвс|вент|котельн|наруж|внутр|оцинк|фольг|нг|дренаж|дорог|откос|склон|асфальт|фундамент|кровл|фасад/i.test(rawQuery)
+  const hasCylinderInResult = relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder')
+  const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
+
+  if (queryNumbers.length === 0) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.push('Уточните размер/плотность/толщину материала, без этого можно показать только общий раздел номенклатуры.')
+  }
+
+  if (relevant_nomenclature.length > 1) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.push('Найдено несколько позиций одного размера. Уточните точный вариант, который нужен клиенту.')
+  }
+
+  if (hasCylinderInResult) {
+    if (!/alu|alu1|фольг|оцинк|me|outside|без покрыт|нг/i.test(rawQuery)) {
+      selection_guidance.clarification_needed = true
+      selection_guidance.questions.push('Для цилиндров уточните покрытие: без покрытия, Alu, Alu1/НГ, ME/оцинковка или Outside.')
+    }
+    if (!hasUseCaseInQuery) {
+      selection_guidance.clarification_needed = true
+      selection_guidance.questions.push('Для цилиндров уточните условия применения: внутри/улица, температура, нужна ли НГ-фольга, оцинковка или защитное покрытие.')
+    }
+  }
+
+  if (hasGeotextileInQuery && relevant_nomenclature.length > 1) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.push('Для геотекстиля уточните плотность, ширину/длину рулона и задачу: дренаж, разделение слоёв, дорога, откос или другое применение.')
+  }
+
+  if (nomenclature_accessories.length > 0 && !hasUseCaseInQuery) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.push('Сопутствующие товары пока являются кандидатами по размеру. Чтобы рекомендовать их клиенту, уточните решение и место применения.')
+  }
+
   let formattedContext = buildContext(
     query,
     products,
@@ -640,6 +687,13 @@ export async function GET(request: NextRequest) {
     nomenclature_analogs,
     nomenclature_accessories
   )
+  if (selection_guidance.questions.length > 0) {
+    formattedContext += '\n\n## Что нужно уточнить у менеджера\n'
+    formattedContext += selection_guidance.questions.map(q => `- ${q}`).join('\n')
+  }
+  formattedContext += '\n\n## Политика достоверности\n'
+  formattedContext += selection_guidance.evidence_policy.map(q => `- ${q}`).join('\n')
+
   if (applicable_rules.length > 0) {
     const rulesText = applicable_rules
       .map(r => `${r.is_prohibition ? '🚫 ЗАПРЕТ' : '📋 ПРАВИЛО'}: ${r.rule_name}\n${r.rule_text}`)
@@ -656,6 +710,7 @@ export async function GET(request: NextRequest) {
     relevant_nomenclature,
     nomenclature_analogs,
     nomenclature_accessories,
+    selection_guidance,
     applicable_rules,
     relevant_notes: notes,
     document_chunks: chunks,
@@ -665,6 +720,7 @@ export async function GET(request: NextRequest) {
       nomenclature_count: relevant_nomenclature.length,
       nomenclature_analogs_count: nomenclature_analogs.length,
       nomenclature_accessories_count: nomenclature_accessories.length,
+      clarification_needed: selection_guidance.clarification_needed,
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
       chunks_count:   chunks.length,
