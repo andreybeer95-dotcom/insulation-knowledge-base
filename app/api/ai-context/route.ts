@@ -216,6 +216,20 @@ export async function GET(request: NextRequest) {
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
   };
 
+  /** manufacturer_id → brand как в nomenclature_1c (подмножество manufacturerMap) */
+  const brandNameMap: Record<string, string> = {
+    '1b4a5543-7101-46cd-9a85-9866dd1132a9': 'XOTPIPE',
+    '4deb56f0-b7c9-46e9-8279-9fc4397419dd': 'ЭКОРОЛЛ',
+    'c0f1731c-12a2-4d6a-bca3-6020711de7f5': 'BASWOOL',
+    '6f22e435-08cc-46ab-ba45-d119ce497581': 'ROCKWOOL',
+    'f5fc0110-8057-47fd-9811-9aa1a2e81d8b': 'ТЕХНОНИКОЛЬ',
+    'f7fac0e0-a00c-4ef0-a456-bc8b097c1204': 'ИКОПАЛ',
+    'e60a463e-1471-4491-a323-4a13f375f044': 'K-FLEX',
+    'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c': 'КНАУФ',
+    '4584f447-4178-4757-901a-00f38614c381': 'ПЕНОПЛЭКС',
+    '4bdf5e83-5b51-4e91-8edf-5cef85bd5560': 'HOTROCK',
+  }
+
   // Приоритет брендов для подбора (когда нет конкретного бренда в запросе)
   // Порядок = приоритет предложения менеджеру
   const BRAND_PRIORITY = [
@@ -346,7 +360,15 @@ export async function GET(request: NextRequest) {
       .select('id, code, article, name, brand')
       .limit(20)
 
-    const nomFilters = allKeywords.map((k) => `name.ilike.%${k}%`).join(',')
+    const nomBrand =
+      detectedManufacturerId && brandNameMap[detectedManufacturerId]
+        ? brandNameMap[detectedManufacturerId]
+        : undefined
+    if (nomBrand) {
+      nomQuery = nomQuery.eq('brand', nomBrand)
+    }
+
+    const nomFilters = queryNumbers.map((k) => `name.ilike.%${k}%`).join(',')
     if (nomFilters) {
       nomQuery = nomQuery.or(nomFilters)
     }
