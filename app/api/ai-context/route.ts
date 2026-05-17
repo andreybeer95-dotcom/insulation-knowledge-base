@@ -419,9 +419,15 @@ export async function GET(request: NextRequest) {
         `name.ilike.% ${k}мм%`,
         `name.ilike.% ${k} мм%`,
         `name.ilike.%x${k} %`,
+        `name.ilike.%x${k} (%`,
         `name.ilike.%x${k})%`,
+        `name.ilike.%x${k},%`,
+        `name.ilike.%x${k}мм%`,
         `name.ilike.%х${k} %`,
+        `name.ilike.%х${k} (%`,
         `name.ilike.%х${k})%`,
+        `name.ilike.%х${k},%`,
+        `name.ilike.%х${k}мм%`,
         `name.ilike.%-${k} %`,
         `name.ilike.%-${k})%`,
         `article.ilike.%${k}%`,
@@ -435,7 +441,13 @@ export async function GET(request: NextRequest) {
       nomQuery = nomQuery.ilike('name', '%геотекст%')
     }
 
-    const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery)
+    const isAccessoryQuery = /отвод|заглуш|пробк|тройник|переход|сегмент|колено/i.test(rawQuery)
+    const isImplicitXotpipeCylinderQuery =
+      /xotpipe|хотпайп/i.test(rawQuery) &&
+      /\bsp\b/i.test(rawQuery) &&
+      queryNumbers.length >= 2 &&
+      !isAccessoryQuery
+    const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery) || isImplicitXotpipeCylinderQuery
     if (isCylinderQuery) {
       nomQuery = nomQuery.ilike('name', '%цилиндр%')
     }
