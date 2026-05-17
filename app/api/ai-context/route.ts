@@ -411,6 +411,12 @@ export async function GET(request: NextRequest) {
     `article.ilike.%${firstSize}х${secondSize}%`,
   ]
 
+  const hasExactSize = (item: NomenclatureItem, firstSize: string, secondSize: string) => {
+    const text = `${item.article || ''} ${item.name || ''}`
+    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
+    return pattern.test(text)
+  }
+
   if (queryNumbers.length > 0) {
     let nomQuery = supabase
       .from('nomenclature_1c')
@@ -477,13 +483,28 @@ export async function GET(request: NextRequest) {
 
     if (queryNumbers.length >= 2) {
       const [firstSize, secondSize] = queryNumbers
-      const { data: relatedData } = await supabase
-        .from('nomenclature_1c')
-        .select('id, code, article, name, brand')
-        .or(getSizeFilters(firstSize, secondSize).join(','))
-        .limit(160)
+      const [relatedByNameRes, relatedByArticleRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', `%${firstSize}%`)
+          .ilike('name', `%${secondSize}%`)
+          .limit(600),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('article', `%${firstSize}%`)
+          .ilike('article', `%${secondSize}%`)
+          .limit(600),
+      ])
 
-      const relatedNomenclature = (relatedData ?? []) as NomenclatureItem[]
+      const relatedById = new Map<string, NomenclatureItem>()
+      for (const item of ([...(relatedByNameRes.data ?? []), ...(relatedByArticleRes.data ?? [])] as NomenclatureItem[])) {
+        if (hasExactSize(item, firstSize, secondSize)) {
+          relatedById.set(item.id, item)
+        }
+      }
+      const relatedNomenclature = Array.from(relatedById.values())
       const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
 
       nomenclature_accessories = relatedNomenclature
