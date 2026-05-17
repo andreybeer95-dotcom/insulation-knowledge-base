@@ -505,6 +505,32 @@ export async function GET(request: NextRequest) {
         }
       }
       const relatedNomenclature = Array.from(relatedById.values())
+      let analogCandidateNomenclature = relatedNomenclature
+      if (nomBrand) {
+        const [analogByNameRes, analogByArticleRes] = await Promise.all([
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .neq('brand', nomBrand)
+            .ilike('name', `%${firstSize}%`)
+            .ilike('name', `%${secondSize}%`)
+            .limit(200),
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .neq('brand', nomBrand)
+            .ilike('article', `%${firstSize}%`)
+            .ilike('article', `%${secondSize}%`)
+            .limit(200),
+        ])
+        const analogById = new Map<string, NomenclatureItem>()
+        for (const item of ([...(analogByNameRes.data ?? []), ...(analogByArticleRes.data ?? [])] as NomenclatureItem[])) {
+          if (hasExactSize(item, firstSize, secondSize)) {
+            analogById.set(item.id, item)
+          }
+        }
+        analogCandidateNomenclature = Array.from(analogById.values())
+      }
       const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
 
       nomenclature_accessories = relatedNomenclature
@@ -517,7 +543,7 @@ export async function GET(request: NextRequest) {
         /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
 
       if (needsCylinderAnalogs) {
-        nomenclature_analogs = relatedNomenclature
+        nomenclature_analogs = analogCandidateNomenclature
           .filter((item) => !relevantIds.has(item.id))
           .filter((item) => getNomenclatureItemType(item.name) === 'cylinder')
           .slice(0, 20)
