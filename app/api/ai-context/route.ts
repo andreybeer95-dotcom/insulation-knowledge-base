@@ -295,6 +295,34 @@ export async function GET(request: NextRequest) {
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
   const allKeywords = [...meaningfulKeywords, ...queryNumbers]
 
+  const hasExactSizeInText = (text: string, firstSize: string, secondSize: string) => {
+    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
+    return pattern.test(text)
+  }
+
+  const productMatchesRequestedSize = (product: any, firstSize: string, secondSize: string) => {
+    if (hasExactSizeInText(product.name || '', firstSize, secondSize)) return true
+
+    const diameter = Number(firstSize)
+    const thickness = Number(secondSize)
+    const diameterMin = Number(product.diameter_min)
+    const diameterMax = Number(product.diameter_max)
+    const productThickness = Number(product.thickness)
+
+    if (!Number.isFinite(diameter) || !Number.isFinite(thickness)) return false
+    if (!Number.isFinite(productThickness) || productThickness !== thickness) return false
+    if (Number.isFinite(diameterMin) && Number.isFinite(diameterMax)) {
+      return diameter >= diameterMin && diameter <= diameterMax
+    }
+    return Number.isFinite(diameterMin) && diameterMin === diameter
+  }
+
+  const filterProductsByRequestedSize = (items: any[]) => {
+    if (queryNumbers.length < 2) return items
+    const [firstSize, secondSize] = queryNumbers
+    return items.filter((item) => productMatchesRequestedSize(item, firstSize, secondSize))
+  }
+
   // Продукты: сначала производитель + ключевые слова, потом fallback на производителя
   let products: any[] = []
   if (product_id) {
@@ -310,7 +338,7 @@ export async function GET(request: NextRequest) {
       .eq('id', product_id)
       .eq('in_stock', true)
       .limit(30)
-    products = data ?? []
+    products = filterProductsByRequestedSize(data ?? [])
   } else if (detectedManufacturerId) {
     let keywordQuery = supabase
       .from('products')
@@ -332,10 +360,10 @@ export async function GET(request: NextRequest) {
     }
 
     const { data: keywordProducts } = await keywordQuery
-    products = keywordProducts ?? []
+    products = filterProductsByRequestedSize(keywordProducts ?? [])
 
-    // Fallback: если по ключевым словам мало, берём весь ассортимент производителя
-    if (products.length < 5) {
+    // Fallback только для запросов без конкретного размера, иначе он создаёт ложные рекомендации.
+    if (products.length < 5 && queryNumbers.length < 2) {
       const { data: fallbackProducts } = await supabase
         .from('products')
         .select(`
@@ -370,7 +398,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { data } = await genericQuery
-    products = data ?? []
+    products = filterProductsByRequestedSize(data ?? [])
   }
 
   type NomenclatureItem = {
@@ -413,8 +441,7 @@ export async function GET(request: NextRequest) {
 
   const hasExactSize = (item: NomenclatureItem, firstSize: string, secondSize: string) => {
     const text = `${item.article || ''} ${item.name || ''}`
-    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
-    return pattern.test(text)
+    return hasExactSizeInText(text, firstSize, secondSize)
   }
 
   if (queryNumbers.length > 0) {
