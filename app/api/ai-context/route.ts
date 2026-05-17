@@ -403,16 +403,13 @@ export async function GET(request: NextRequest) {
       const sizeFilters = [
         `name.ilike.% ${firstSize}x${secondSize}%`,
         `name.ilike.% ${firstSize}х${secondSize}%`,
-        `name.ilike.% ${firstSize}*${secondSize}%`,
         `name.ilike.% ${firstSize}-${secondSize}%`,
         `name.ilike.%(${firstSize}x${secondSize}%`,
         `name.ilike.%(${firstSize}х${secondSize}%`,
-        `name.ilike.%(${firstSize}*${secondSize}%`,
         `name.ilike.%(${firstSize}-${secondSize}%`,
         `article.ilike.%${firstSize}-${secondSize}%`,
         `article.ilike.%${firstSize}x${secondSize}%`,
         `article.ilike.%${firstSize}х${secondSize}%`,
-        `article.ilike.%${firstSize}*${secondSize}%`,
       ].join(',')
 
       nomQuery = nomQuery.or(sizeFilters)
@@ -421,10 +418,6 @@ export async function GET(request: NextRequest) {
         `name.ilike.% ${k} %`,
         `name.ilike.% ${k}мм%`,
         `name.ilike.% ${k} мм%`,
-        `name.ilike.%*${k} %`,
-        `name.ilike.%*${k})%`,
-        `name.ilike.%*${k}(%`,
-        `name.ilike.%*${k},%`,
         `name.ilike.%x${k} %`,
         `name.ilike.%x${k})%`,
         `name.ilike.%х${k} %`,
