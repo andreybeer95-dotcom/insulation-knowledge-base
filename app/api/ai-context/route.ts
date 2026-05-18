@@ -791,10 +791,11 @@ export async function GET(request: NextRequest) {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
     const mfr = (Array.isArray(mfrRaw) ? mfrRaw[0] : mfrRaw)?.name_ru ?? chunk.manufacturer ?? ''
-    const text = `${chunk.content || ''} ${doc?.title || chunk.doc_title || ''} ${mfr}`.toLowerCase()
+    const contentAndTitle = `${chunk.content || ''} ${doc?.title || chunk.doc_title || ''}`.toLowerCase()
+    const text = `${contentAndTitle} ${mfr}`.toLowerCase()
 
     if (hasGeotextileQueryForContext) return /геотекст|геоткан|дорнит|геоком|georex|геосинтет/i.test(text)
-    if (hasXpsQueryForContext) return /xps|экструз|пенополистирол|пенопл[еэ]кс|техноплекс|carbon|утеплитель|плит/i.test(text)
+    if (hasXpsQueryForContext) return /xps|экструз|пенополистирол|техноплекс|carbon|плиты?\s+пенопл[еэ]кс|пенопл[еэ]кс\s+(кровля|уклон|комфорт|гео|основа)/i.test(contentAndTitle)
     if (hasCylinderQueryForContext) return /цилиндр|скорлуп|xotpipe|хотпайп|трубопровод/i.test(text)
     return true
   }
@@ -819,7 +820,7 @@ export async function GET(request: NextRequest) {
   const topicProhibitionMatches = (rule: any) => {
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
     if (hasGeotextileQueryForContext) return /геотекст|геоткан|дорнит|геосинтет|геореш|откос|склон|асфальт|площадк|парковк|нагруз/i.test(haystack)
-    if (hasXpsQueryForContext) return /xps|пенополистирол|экструз|техноплекс|carbon|кровл|фасад|нг|пожар/i.test(haystack)
+    if (hasXpsQueryForContext) return /xps|пенополистирол|экструз|техноплекс|carbon/i.test(haystack)
     if (hasCylinderQueryForContext) return /цилиндр|труб|фольг|оцинк|котельн|шахт|xotpipe|хотпайп/i.test(haystack)
     return false
   }
