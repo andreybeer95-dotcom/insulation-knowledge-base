@@ -342,10 +342,16 @@ export async function GET(request: NextRequest) {
   const allKeywords = [...meaningfulKeywords, ...requestedSizeNumbers]
   const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
   const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг/i.test(rawQuery)
+  const hasMultiStoreyFacadeQueryForNomenclature =
+    hasVentFacadeQueryForNomenclature &&
+    /(поликлиник|обществен|этажност\D*(?:[3-9]|\d{2,})|(?:[3-9]|\d{2,})\s*[- ]?этаж)/i.test(rawQuery)
+  const hasRoofWoolQueryForNomenclature =
+    /техноруф|(?:^|\s)руф\s*[нв]?\b|кровельн\w*\s+утепл|утеплител\w*\s+кровл/i.test(rawQuery)
   const hasConstructionInsulationQueryForNomenclature =
     !hasCylinderQueryForNomenclature &&
     (
       hasVentFacadeQueryForNomenclature ||
+      hasRoofWoolQueryForNomenclature ||
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
   const isBareThicknessOnly =
@@ -455,6 +461,12 @@ export async function GET(request: NextRequest) {
     article: string | null
     name: string | null
     brand: string | null
+    product_category_type?: string | null
+    code_1c_parent?: string | null
+    revenue_3y?: number | null
+    qty_3y?: number | null
+    is_active?: boolean | null
+    is_old?: boolean | null
   }
 
   type RequestedInvoiceLine = {
@@ -632,6 +644,48 @@ export async function GET(request: NextRequest) {
     return result
   }
 
+  const enrichNomenclatureWithProductMeta = async (items: NomenclatureItem[]) => {
+    const codes = Array.from(new Set(items.map((item) => item.code).filter(Boolean))) as string[]
+    if (codes.length === 0) return items
+
+    const { data } = await supabase
+      .from('products')
+      .select('kod_1c, category_type, code_1c_parent, revenue_3y, qty_3y, is_active, is_old')
+      .in('kod_1c', codes)
+      .limit(codes.length)
+
+    const metaByCode = new Map(
+      (data ?? []).map((row: any) => [row.kod_1c as string, row])
+    )
+
+    return items.map((item) => {
+      const meta = item.code ? metaByCode.get(item.code) : null
+      if (!meta) return item
+      return {
+        ...item,
+        product_category_type: meta.category_type ?? null,
+        code_1c_parent: meta.code_1c_parent ?? null,
+        revenue_3y: meta.revenue_3y === null || meta.revenue_3y === undefined ? null : Number(meta.revenue_3y),
+        qty_3y: meta.qty_3y === null || meta.qty_3y === undefined ? null : Number(meta.qty_3y),
+        is_active: meta.is_active ?? null,
+        is_old: meta.is_old ?? null,
+      }
+    })
+  }
+
+  const relinkInvoiceLines = () => {
+    const invoiceItemByArticle = new Map(
+      requested_invoice_items
+        .filter((item) => item.article)
+        .map((item) => [item.article as string, item])
+    )
+    requested_invoice_lines = requested_invoice_lines.map((line) => ({
+      ...line,
+      found_item: invoiceItemByArticle.get(line.article) ?? null,
+    }))
+    missing_invoice_items = requested_invoice_lines.filter((line) => !line.found_item)
+  }
+
   const addRequestedInvoiceArticles = (articles: Set<string>) => {
     const [firstSize, secondSize] = requestedSizeNumbers
     const hasXotpipeSp100 = /xotpipe|хотпайп/i.test(rawQuery) && /\bsp[-\s]*100\b/i.test(rawQuery)
@@ -686,6 +740,25 @@ export async function GET(request: NextRequest) {
     return rawDensity ? Number(rawDensity) : null
   }
 
+  const getBaswoolLightDensity = (name?: string | null) => {
+    const text = name || ''
+    const rawDensity = text.match(/ЛАЙТ[-\s]*(35|45)/i)?.[1]
+    return rawDensity ? Number(rawDensity) : null
+  }
+
+  const getBaswoolRoofRole = (name?: string | null) => {
+    const text = name || ''
+    if (/РУФ\s+Н/i.test(text)) return 'lower'
+    if (/РУФ\s+В/i.test(text)) return 'upper'
+    return 'single'
+  }
+
+  const getBaswoolRoofGrade = (name?: string | null) => {
+    const text = name || ''
+    const rawGrade = text.match(/РУФ\s+[НВ]\s*(\d{2,3})/i)?.[1] ?? text.match(/РУФ\s*(\d{2,3})/i)?.[1]
+    return rawGrade ? Number(rawGrade) : null
+  }
+
   const sortBaswoolFacade = (items: NomenclatureItem[], preferredThicknesses: string[]) => {
     const thicknessPreference = preferredThicknesses.map(Number).filter(Boolean)
     const densityPreference = [90, 80, 70]
@@ -705,6 +778,53 @@ export async function GET(request: NextRequest) {
       const normalizedADensityRank = aDensityRank === -1 ? 99 : aDensityRank
       const normalizedBDensityRank = bDensityRank === -1 ? 99 : bDensityRank
       if (normalizedADensityRank !== normalizedBDensityRank) return normalizedADensityRank - normalizedBDensityRank
+
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
+  }
+
+  const sortBaswoolLight = (items: NomenclatureItem[], preferredThicknesses: string[]) => {
+    const thicknessPreference = preferredThicknesses.map(Number).filter(Boolean)
+    const densityPreference = [45, 35]
+    return [...items].sort((a, b) => {
+      const aDensityRank = densityPreference.indexOf(getBaswoolLightDensity(a.name) ?? 0)
+      const bDensityRank = densityPreference.indexOf(getBaswoolLightDensity(b.name) ?? 0)
+      const normalizedADensityRank = aDensityRank === -1 ? 99 : aDensityRank
+      const normalizedBDensityRank = bDensityRank === -1 ? 99 : bDensityRank
+      if (normalizedADensityRank !== normalizedBDensityRank) return normalizedADensityRank - normalizedBDensityRank
+
+      const aThicknessRank = thicknessPreference.indexOf(getBoardThickness(a.name) ?? 0)
+      const bThicknessRank = thicknessPreference.indexOf(getBoardThickness(b.name) ?? 0)
+      const normalizedAThicknessRank = aThicknessRank === -1 ? 99 : aThicknessRank
+      const normalizedBThicknessRank = bThicknessRank === -1 ? 99 : bThicknessRank
+      if (normalizedAThicknessRank !== normalizedBThicknessRank) return normalizedAThicknessRank - normalizedBThicknessRank
+
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
+  }
+
+  const sortBaswoolRoof = (
+    items: NomenclatureItem[],
+    preferredThicknesses: string[],
+    preferredGrades: number[]
+  ) => {
+    const thicknessPreference = preferredThicknesses.map(Number).filter(Boolean)
+    return [...items].sort((a, b) => {
+      const aThicknessRank = thicknessPreference.indexOf(getBoardThickness(a.name) ?? 0)
+      const bThicknessRank = thicknessPreference.indexOf(getBoardThickness(b.name) ?? 0)
+      const normalizedAThicknessRank = aThicknessRank === -1 ? 99 : aThicknessRank
+      const normalizedBThicknessRank = bThicknessRank === -1 ? 99 : bThicknessRank
+      if (normalizedAThicknessRank !== normalizedBThicknessRank) return normalizedAThicknessRank - normalizedBThicknessRank
+
+      const aGradeRank = preferredGrades.indexOf(getBaswoolRoofGrade(a.name) ?? 0)
+      const bGradeRank = preferredGrades.indexOf(getBaswoolRoofGrade(b.name) ?? 0)
+      const normalizedAGradeRank = aGradeRank === -1 ? 99 : aGradeRank
+      const normalizedBGradeRank = bGradeRank === -1 ? 99 : bGradeRank
+      if (normalizedAGradeRank !== normalizedBGradeRank) return normalizedAGradeRank - normalizedBGradeRank
+
+      const aRevenue = a.revenue_3y ?? 0
+      const bRevenue = b.revenue_3y ?? 0
+      if (aRevenue !== bRevenue) return bRevenue - aRevenue
 
       return (a.name || '').localeCompare(b.name || '', 'ru')
     })
@@ -1001,23 +1121,111 @@ export async function GET(request: NextRequest) {
       requested_invoice_items = dedupeNomenclature(
         invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
       )
-      const invoiceItemByArticle = new Map(
-        requested_invoice_items
-          .filter((item) => item.article)
-          .map((item) => [item.article as string, item])
-      )
-      requested_invoice_lines = requested_invoice_lines.map((line) => ({
-        ...line,
-        found_item: invoiceItemByArticle.get(line.article) ?? null,
-      }))
-      missing_invoice_items = requested_invoice_lines.filter((line) => !line.found_item)
+      relinkInvoiceLines()
     }
+  }
+
+  if (hasRoofWoolQueryForNomenclature) {
+    const lowerThicknesses = Array.from(rawQuery.matchAll(/(?:техноруф\s+н|(?:^|\s)н)(?:\s+проф|\s+оптим[ао]|\s+экстра)?\D{0,24}(\d{2,3})/gi))
+      .map((match) => match[1])
+    const upperThicknesses = Array.from(rawQuery.matchAll(/(?:техноруф\s+в|(?:^|\s)в)(?:\s+проф|\s+оптим[ао]|\s+экстра)?\D{0,24}(\d{2,3})/gi))
+      .map((match) => match[1])
+    const fallbackRoofThicknesses = constructionThicknesses.length > 0 ? constructionThicknesses : ['120', '50', '100']
+    const preferredLowerThicknesses = lowerThicknesses.length > 0 ? lowerThicknesses : fallbackRoofThicknesses
+    const preferredUpperThicknesses = upperThicknesses.length > 0 ? upperThicknesses : fallbackRoofThicknesses
+    const wantsLowerLayer = lowerThicknesses.length > 0 || /техноруф\s+н|руф\s+н|(?:^|\s)н\s+(?:проф|оптим|экстра)|нижн/i.test(rawQuery)
+    const wantsUpperLayer = upperThicknesses.length > 0 || /техноруф\s+в|руф\s+в|(?:^|\s)в\s+(?:проф|оптим|экстра)|верхн/i.test(rawQuery)
+
+    const roofQueries: PromiseLike<{ data: any[] | null }>[] = []
+    if (wantsLowerLayer || !wantsUpperLayer) {
+      roofQueries.push(
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .eq('brand', 'BASWOOL')
+          .ilike('name', '%РУФ Н%')
+          .limit(300)
+      )
+    }
+    if (wantsUpperLayer || !wantsLowerLayer) {
+      roofQueries.push(
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .eq('brand', 'BASWOOL')
+          .ilike('name', '%РУФ В%')
+          .limit(300)
+      )
+    }
+
+    const technoRoofQuery = supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .eq('brand', 'ТЕХНОНИКОЛЬ')
+      .ilike('name', '%ТЕХНОРУФ%')
+      .limit(300)
+
+    const [roofResults, technoRoofResult] = await Promise.all([
+      Promise.all(roofQueries),
+      technoRoofQuery,
+    ])
+
+    const roofCandidates = await enrichNomenclatureWithProductMeta(
+      dedupeNomenclature(roofResults.flatMap((result) => (result.data ?? []) as NomenclatureItem[]))
+    )
+
+    const lowerItems = sortBaswoolRoof(
+      roofCandidates.filter((item) =>
+        getBaswoolRoofRole(item.name) === 'lower' &&
+        preferredLowerThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+      ),
+      preferredLowerThicknesses,
+      /н\s+проф/i.test(rawQuery) ? [120, 110, 100] : [100, 110, 120]
+    )
+
+    const upperItems = sortBaswoolRoof(
+      roofCandidates.filter((item) =>
+        getBaswoolRoofRole(item.name) === 'upper' &&
+        preferredUpperThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+      ),
+      preferredUpperThicknesses,
+      /в\s+оптим[ао]/i.test(rawQuery) ? [160, 170, 180, 190] : [170, 180, 160, 190]
+    )
+
+    const technoRoofItems = await enrichNomenclatureWithProductMeta(
+      dedupeNomenclature(((technoRoofResult.data ?? []) as NomenclatureItem[]).filter((item) =>
+        [...preferredLowerThicknesses, ...preferredUpperThicknesses].some((thickness) => hasBoardThickness(item.name, thickness))
+      ))
+    )
+    const sortedTechnoRoofItems = [...technoRoofItems].sort((a, b) => {
+      const score = (item: NomenclatureItem) => {
+        const name = item.name || ''
+        if (/ТЕХНОРУФ\s+Н\s+ПРОФ/i.test(name) && preferredLowerThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 0
+        if (/ТЕХНОРУФ\s+В\s+ОПТИМ/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 1
+        if (/ТЕХНОРУФ\s+Н/i.test(name) && preferredLowerThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 10
+        if (/ТЕХНОРУФ\s+В/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 20
+        return 99
+      }
+      const scoreDiff = score(a) - score(b)
+      if (scoreDiff !== 0) return scoreDiff
+      return (b.revenue_3y ?? 0) - (a.revenue_3y ?? 0)
+    })
+
+    relevant_nomenclature = dedupeNomenclature([
+      ...lowerItems.slice(0, 4),
+      ...upperItems.slice(0, 4),
+    ]).slice(0, 12)
+
+    nomenclature_analogs = dedupeNomenclature([
+      ...sortedTechnoRoofItems,
+      ...nomenclature_analogs,
+    ]).slice(0, 12)
   }
 
   if (hasVentFacadeQueryForNomenclature) {
     const preferredThicknesses = constructionThicknesses.length > 0
       ? constructionThicknesses
-      : ['150', '100']
+      : hasMultiStoreyFacadeQueryForNomenclature ? ['100', '50', '150'] : ['150', '100']
     const thicknessFilters = preferredThicknesses.flatMap((thickness) => [
       `name.ilike.%*${thickness}%`,
       `name.ilike.%х${thickness}%`,
@@ -1035,8 +1243,16 @@ export async function GET(request: NextRequest) {
       facadeQuery = facadeQuery.or(thicknessFilters)
     }
 
-    const [{ data: facadeData }, { data: membraneData }, { data: bolgirusData }] = await Promise.all([
+    let lightQuery = supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .eq('brand', 'BASWOOL')
+      .or('name.ilike.%ЛАЙТ-35%,name.ilike.%ЛАЙТ-45%')
+      .limit(60)
+
+    const [{ data: facadeData }, { data: lightData }, { data: membraneData }, { data: bolgirusData }] = await Promise.all([
       facadeQuery,
+      hasMultiStoreyFacadeQueryForNomenclature ? lightQuery : Promise.resolve({ data: [] }),
       supabase
         .from('nomenclature_1c')
         .select('id, code, article, name, brand')
@@ -1050,10 +1266,17 @@ export async function GET(request: NextRequest) {
     ])
 
     const facadeItems = sortBaswoolFacade((facadeData ?? []) as NomenclatureItem[], preferredThicknesses)
+    const lightItems = sortBaswoolLight(
+      ((lightData ?? []) as NomenclatureItem[]).filter((item) =>
+        preferredThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+      ),
+      preferredThicknesses
+    )
     const existingVentFacadeItems = relevant_nomenclature.filter((item) =>
       /ВЕНТ\s+ФАСАД/i.test(item.name || '')
     )
     relevant_nomenclature = dedupeNomenclature([
+      ...lightItems,
       ...facadeItems,
       ...existingVentFacadeItems,
     ]).slice(0, 20)
@@ -1077,6 +1300,19 @@ export async function GET(request: NextRequest) {
     nomenclature_analogs = []
     nomenclature_accessories = []
   }
+
+  ;[
+    relevant_nomenclature,
+    nomenclature_analogs,
+    nomenclature_accessories,
+    requested_invoice_items,
+  ] = await Promise.all([
+    enrichNomenclatureWithProductMeta(relevant_nomenclature),
+    enrichNomenclatureWithProductMeta(nomenclature_analogs),
+    enrichNomenclatureWithProductMeta(nomenclature_accessories),
+    enrichNomenclatureWithProductMeta(requested_invoice_items),
+  ])
+  relinkInvoiceLines()
 
   // ─── параллельные запросы ─────────────────────────────────
   const [rulesRes, notesRes, chunksRes] = await Promise.allSettled([
@@ -1113,6 +1349,7 @@ export async function GET(request: NextRequest) {
   const hasXpsQueryForContext = /xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)
   const hasCylinderQueryForContext = hasCylinderQueryForNomenclature
   const hasVentFacadeQueryForContext = hasVentFacadeQueryForNomenclature
+  const hasRoofWoolQueryForContext = hasRoofWoolQueryForNomenclature
   const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
@@ -1252,6 +1489,15 @@ export async function GET(request: NextRequest) {
       'Наружный слой НФС: BASWOOL ВЕНТ ФАСАД 70/80/90. Для 3+ этажей и общественных зданий рассматривать двухслойную систему.',
     ]
     selection_guidance.recommendation_status = 'construction_manager_context'
+  }
+
+  if (hasRoofWoolQueryForContext) {
+    selection_guidance.answer_policy = [
+      'Запросы ТЕХНОРУФ/РУФ относятся к плоской кровле, не к вентфасаду. Не предлагать ВЕНТ ФАСАД вместо РУФ.',
+      'Для двухслойной кровли: РУФ Н — нижний слой, РУФ В — верхний слой. Сохранять толщины из запроса по слоям.',
+      'BASWOOL РУФ давать первым как коммерческий аналог, но если клиент просит именно ТЕХНОРУФ, исходные позиции ТЕХНОНИКОЛЬ можно указать отдельной строкой как запрошенный вариант из analogs.',
+      ...selection_guidance.answer_policy,
+    ]
   }
 
   if (strictInvoiceMode) {
@@ -1439,9 +1685,22 @@ export async function GET(request: NextRequest) {
       ? shortInvoiceItems.slice(0, 8).map((n) => {
       const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
       const articlePart = n.article ? ` | article: ${n.article}` : ''
-      return `- **${n.name ?? '—'}** (${codePart}${articlePart})`
+      const categoryPart = n.product_category_type ? ` | группа: ${n.product_category_type}` : ''
+      const parentPart = n.code_1c_parent ? ` | родитель 1С: ${n.code_1c_parent}` : ''
+      return `- **${n.name ?? '—'}** (${codePart}${articlePart}${categoryPart}${parentPart})`
         })
       : ['- Точной позиции 1С в контексте нет. Основной вариант без кода не давать.']),
+    ...(nomenclature_analogs.length > 0
+      ? [
+          '',
+          '## Аналоги / запрошенный вариант',
+          ...nomenclature_analogs.slice(0, 6).map((n) => {
+            const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
+            const categoryPart = n.product_category_type ? ` | группа: ${n.product_category_type}` : ''
+            return `- **${n.name ?? '—'}** (${codePart}${categoryPart})`
+          }),
+        ]
+      : []),
     '',
     '## Сопутствующие',
     ...(strictInvoiceMode
@@ -1465,6 +1724,12 @@ export async function GET(request: NextRequest) {
     '- Не писать "в наличии", если нет подтвержденного остатка.',
     ...(hasConstructionInsulationQueryForContext
       ? [
+          ...(hasRoofWoolQueryForContext
+            ? [
+                '- ТЕХНОРУФ/РУФ = плоская кровля, не вентфасад; РУФ Н нижний слой, РУФ В верхний слой.',
+                '- Для замены ТЕХНОРУФ предлагать BASWOOL РУФ первым с кодом 1С; исходный ТЕХНОРУФ только отдельным вариантом, если он есть в analogs.',
+              ]
+            : []),
           '- По минвате первым BASWOOL, вторым ROCKWOOL; ТЕХНОНИКОЛЬ по минвате не ставить первым.',
           '- Для вентфасада проверить мембрану и фасадный крепеж; Силму не ставить основным вариантом.',
         ]
@@ -1487,6 +1752,10 @@ export async function GET(request: NextRequest) {
         article: item.article,
         name: item.name,
         brand: item.brand,
+        category_type: item.product_category_type,
+        parent_code: item.code_1c_parent,
+        revenue_3y: item.revenue_3y,
+        qty_3y: item.qty_3y,
       })),
       invoice_lines: requested_invoice_lines.slice(0, 12).map((line) => ({
         line: line.line,
@@ -1500,6 +1769,8 @@ export async function GET(request: NextRequest) {
               article: line.found_item.article,
               name: line.found_item.name,
               brand: line.found_item.brand,
+              category_type: line.found_item.product_category_type,
+              parent_code: line.found_item.code_1c_parent,
             }
           : null,
       })),
@@ -1515,12 +1786,26 @@ export async function GET(request: NextRequest) {
         article: item.article,
         name: item.name,
         brand: item.brand,
+        category_type: item.product_category_type,
+        parent_code: item.code_1c_parent,
       })),
       accessories: accessoriesForTool.slice(0, 6).map((item) => ({
         code: item.code,
         article: item.article,
         name: item.name,
         brand: item.brand,
+        category_type: item.product_category_type,
+        parent_code: item.code_1c_parent,
+      })),
+      analogs: nomenclature_analogs.slice(0, 6).map((item) => ({
+        code: item.code,
+        article: item.article,
+        name: item.name,
+        brand: item.brand,
+        category_type: item.product_category_type,
+        parent_code: item.code_1c_parent,
+        revenue_3y: item.revenue_3y,
+        qty_3y: item.qty_3y,
       })),
       questions: selection_guidance.questions.slice(0, 3),
       rules: compactRules.map((rule) => ({
