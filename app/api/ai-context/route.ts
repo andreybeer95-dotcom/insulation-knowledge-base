@@ -411,6 +411,27 @@ export async function GET(request: NextRequest) {
     return 'other'
   }
 
+  const hasStandaloneNumber = (text: string, value: string) => {
+    const pattern = new RegExp(`(^|\\D)${value}(\\D|$)`, 'i')
+    return pattern.test(text)
+  }
+
+  const isGeotextileNomenclature = (name?: string | null) =>
+    /геотекст|геоткан|дорнит|геоком|georex|полотно иглопробивное/i.test(name || '')
+
+  const isXpsNomenclature = (name?: string | null) =>
+    /xps|экструзи|экструдир|пенопл[еэ]кс|техноплекс|carbon/i.test(name || '')
+
+  const hasBoardThickness = (name: string | null | undefined, thickness: string) => {
+    const text = name || ''
+    const patterns = [
+      new RegExp(`[xх*]\\s*${thickness}\\s*(мм|\\)|\\s|,|$)`, 'i'),
+      new RegExp(`(^|\\D)${thickness}\\s*(мм|$)`, 'i'),
+      new RegExp(`(^|\\D)${thickness}\\s*[xх*]\\s*\\d{3,4}`, 'i'),
+    ]
+    return patterns.some((pattern) => pattern.test(text))
+  }
+
   const isNomenclatureAccessory = (name?: string | null) =>
     ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
 
@@ -494,6 +515,66 @@ export async function GET(request: NextRequest) {
 
     const { data: nomData } = await nomQuery
     relevant_nomenclature = nomData ?? []
+
+    const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
+    const hasXpsInQuery = /xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)
+
+    if (queryNumbers.length === 1 && (hasGeotextileInQuery || hasXpsInQuery)) {
+      const [singleValue] = queryNumbers
+      const broadNomenclatureRes = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .ilike('name', `%${singleValue}%`)
+        .limit(1500)
+
+      const broadNomenclature = (broadNomenclatureRes.data ?? []) as NomenclatureItem[]
+      const matchesSpecialQuery = (item: NomenclatureItem) => {
+        if (hasGeotextileInQuery) {
+          const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+          const matchesRequestedBrand =
+            !nomBrand ||
+            item.brand === nomBrand ||
+            (nomBrand === 'ДОРНИТ' && /дорнит/.test(brandOrName))
+          return matchesRequestedBrand && isGeotextileNomenclature(item.name) && hasStandaloneNumber(item.name || '', singleValue)
+        }
+        if (hasXpsInQuery) {
+          const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+          const matchesRequestedBrand =
+            !nomBrand ||
+            item.brand === nomBrand ||
+            (nomBrand === 'ПЕНОПЛЭКС' && /пенопл[еэ]кс/.test(brandOrName))
+          return matchesRequestedBrand && isXpsNomenclature(item.name) && hasBoardThickness(item.name, singleValue)
+        }
+        return false
+      }
+
+      relevant_nomenclature = broadNomenclature
+        .filter(matchesSpecialQuery)
+        .slice(0, 20)
+
+      const relevantSpecialIds = new Set(relevant_nomenclature.map((item) => item.id))
+      nomenclature_analogs = broadNomenclature
+        .filter((item) => !relevantSpecialIds.has(item.id))
+        .filter((item) => {
+          if (hasGeotextileInQuery) {
+            const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+            const isRequestedBrand =
+              nomBrand &&
+              (item.brand === nomBrand || (nomBrand === 'ДОРНИТ' && /дорнит/.test(brandOrName)))
+            return !isRequestedBrand && isGeotextileNomenclature(item.name) && hasStandaloneNumber(item.name || '', singleValue)
+          }
+          if (hasXpsInQuery) {
+            const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+            const isRequestedBrand =
+              nomBrand &&
+              (item.brand === nomBrand || (nomBrand === 'ПЕНОПЛЭКС' && /пенопл[еэ]кс/.test(brandOrName)))
+            return !isRequestedBrand && isXpsNomenclature(item.name) && hasBoardThickness(item.name, singleValue)
+          }
+          return false
+        })
+        .filter((item) => !nomBrand || item.brand !== nomBrand)
+        .slice(0, 20)
+    }
 
     if (queryNumbers.length >= 2) {
       const [firstSize, secondSize] = queryNumbers
@@ -589,6 +670,11 @@ export async function GET(request: NextRequest) {
           .slice(0, 20)
       }
     }
+  }
+
+  // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
+  if (relevant_nomenclature.length > 0 && queryNumbers.length > 0) {
+    products = []
   }
 
   // ─── параллельные запросы ─────────────────────────────────
