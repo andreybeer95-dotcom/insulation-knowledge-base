@@ -580,7 +580,7 @@ export async function GET(request: NextRequest) {
           const matchesRequestedBrand =
             !nomBrand ||
             item.brand === nomBrand ||
-            (nomBrand === 'ДОРНИТ' && /дорнит/.test(brandOrName))
+            (nomBrand === 'ДОРНИТ' && !item.brand && /дорнит/.test(brandOrName))
           return matchesRequestedBrand && isGeotextileNomenclature(item.name) && hasStandaloneNumber(item.name || '', singleValue)
         }
         if (hasXpsInQuery) {
@@ -588,7 +588,7 @@ export async function GET(request: NextRequest) {
           const matchesRequestedBrand =
             !nomBrand ||
             item.brand === nomBrand ||
-            (nomBrand === 'ПЕНОПЛЭКС' && /пенопл[еэ]кс/.test(brandOrName))
+            (nomBrand === 'ПЕНОПЛЭКС' && !item.brand && /пенопл[еэ]кс/.test(brandOrName))
           return matchesRequestedBrand && isXpsNomenclature(item.name) && hasBoardThickness(item.name, singleValue)
         }
         return false
