@@ -301,20 +301,7 @@ export async function GET(request: NextRequest) {
   }
 
   const productMatchesRequestedSize = (product: any, firstSize: string, secondSize: string) => {
-    if (hasExactSizeInText(product.name || '', firstSize, secondSize)) return true
-
-    const diameter = Number(firstSize)
-    const thickness = Number(secondSize)
-    const diameterMin = Number(product.diameter_min)
-    const diameterMax = Number(product.diameter_max)
-    const productThickness = Number(product.thickness)
-
-    if (!Number.isFinite(diameter) || !Number.isFinite(thickness)) return false
-    if (!Number.isFinite(productThickness) || productThickness !== thickness) return false
-    if (Number.isFinite(diameterMin) && Number.isFinite(diameterMax)) {
-      return diameter >= diameterMin && diameter <= diameterMax
-    }
-    return Number.isFinite(diameterMin) && diameterMin === diameter
+    return hasExactSizeInText(product.name || '', firstSize, secondSize)
   }
 
   const filterProductsByRequestedSize = (items: any[]) => {
