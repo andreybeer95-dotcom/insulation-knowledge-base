@@ -833,6 +833,18 @@ export async function GET(request: NextRequest) {
   const selection_guidance = {
     clarification_needed: false,
     questions: [] as string[],
+    answer_policy: [
+      'Структура ответа менеджеру: 1) что найдено для счета по точным кодам 1С; 2) что является кандидатами в аналоги; 3) что нужно уточнить; 4) какие правила/техлисты ограничивают рекомендацию.',
+      'Для счета использовать только позиции из relevant_nomenclature с кодом 1С. Не писать "нет в базе", пока не проверены relevant_nomenclature, nomenclature_accessories и точные размерные совпадения.',
+      'Не писать "в наличии", если в контексте нет подтвержденного остатка/склада. Разрешено писать только "есть в номенклатуре 1С" или "найден код 1С".',
+      'Если пользователь просит счет, сначала собрать основной вариант по точным кодам 1С, а аналоги вынести отдельным блоком "кандидаты для альтернативного счета".',
+    ],
+    analog_policy: [
+      'nomenclature_analogs — это кандидаты по типу товара и размеру/плотности/толщине, а не автоматическая равноценная замена.',
+      'Перед рекомендацией аналога сверить условия применения: назначение, место монтажа, температура, пожарные требования, покрытие, плотность/марка и необходимость защитного слоя.',
+      'Если у аналога другая плотность, покрытие, серия или нет подтверждения НГ/Г1 в правилах или техлисте, писать "кандидат в аналог, требует проверки по условиям".',
+      'Не предлагать фольгированный аналог вместо решения "без покрытия + оцинкованная окожушка" без отдельного подтверждения, потому что фольга и оцинковка запрещены правилами.',
+    ],
     evidence_policy: [
       'Не придумывать технические характеристики. Использовать только selection_rules и document_chunks из официальных техлистов/документов производителя.',
       'Если в контексте нет правила или официального техлиста под ситуацию клиента, нужно написать: требуется уточнение/проверка по техлисту производителя.',
@@ -867,6 +879,11 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (nomenclature_analogs.length > 0) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.push('Аналоги найдены как кандидаты по размеру/типу. Перед включением в альтернативный счет уточните условия применения и требования к покрытию, плотности/марке и пожарной группе.')
+  }
+
   if (hasGeotextileInQuery && relevant_nomenclature.length > 1) {
     selection_guidance.clarification_needed = true
     selection_guidance.questions.push('Для геотекстиля уточните плотность, ширину/длину рулона и задачу: дренаж, разделение слоёв, дорога, откос или другое применение.')
@@ -891,6 +908,10 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Что нужно уточнить у менеджера\n'
     formattedContext += selection_guidance.questions.map(q => `- ${q}`).join('\n')
   }
+  formattedContext += '\n\n## Как отвечать менеджеру\n'
+  formattedContext += selection_guidance.answer_policy.map(q => `- ${q}`).join('\n')
+  formattedContext += '\n\n## Политика аналогов\n'
+  formattedContext += selection_guidance.analog_policy.map(q => `- ${q}`).join('\n')
   formattedContext += '\n\n## Политика достоверности\n'
   formattedContext += selection_guidance.evidence_policy.map(q => `- ${q}`).join('\n')
 
