@@ -1234,25 +1234,52 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Правила подбора\n' + rulesText;
   }
 
+  const shortInvoiceItems = requested_invoice_items.length > 0
+    ? requested_invoice_items
+    : relevant_nomenclature
+  const shouldUseCompactResponse = compactMode || hasConstructionInsulationQueryForContext || isBareThicknessOnly
   const compactFormattedContext = [
-    '# Короткий контекст для счета',
+    '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
     '',
-    '## Точные позиции 1С',
-    ...requested_invoice_items.map((n) => {
+    '## Основные позиции 1С',
+    ...(shortInvoiceItems.length > 0
+      ? shortInvoiceItems.slice(0, 8).map((n) => {
       const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
       const articlePart = n.article ? ` | article: ${n.article}` : ''
       return `- **${n.name ?? '—'}** (${codePart}${articlePart})`
-    }),
+        })
+      : ['- Точной позиции 1С в контексте нет. Основной вариант без кода не давать.']),
+    '',
+    '## Сопутствующие',
+    ...(nomenclature_accessories.length > 0
+      ? nomenclature_accessories.slice(0, 6).map((n) => {
+          const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: проверить'
+          return `- **${n.name ?? '—'}** (${codePart})`
+        })
+      : ['- Проверить сопутствующие по проекту.']),
+    '',
+    '## Что уточнить',
+    ...(selection_guidance.questions.length > 0
+      ? selection_guidance.questions.slice(0, 3).map((q) => `- ${q}`)
+      : ['- Уточнения не требуются для предварительной рекомендации.']),
     '',
     '## Правила ответа',
-    '- Если позиция есть в списке точных позиций 1С, запрещено писать "нет в базе".',
-    '- XOTPIPE без покрытия + оцинкованная окожушка O-ME-ZN допустимо.',
-    '- Запрет "фольга + оцинковка" относится только к Alu/Alu1/фольгированным цилиндрам с отдельной оцинковкой.',
+    '- Ответ 5-8 строк: рекомендация, код 1С, сопутствующие, уточнить, почему.',
+    '- Основной вариант давать только с кодом 1С из этого контекста.',
+    '- Позиции без кода 1С писать только как кандидат: код нужно проверить.',
     '- Не писать "в наличии", если нет подтвержденного остатка.',
+    ...(hasConstructionInsulationQueryForContext
+      ? [
+          '- По минвате первым BASWOOL, вторым ROCKWOOL; ТЕХНОНИКОЛЬ по минвате не ставить первым.',
+          '- Для вентфасада проверить мембрану и фасадный крепеж; Силму не ставить основным вариантом.',
+        ]
+      : [
+          '- XOTPIPE без покрытия + оцинкованная окожушка O-ME-ZN допустимо.',
+          '- Запрет "фольга + оцинковка" относится только к Alu/Alu1/фольгированным цилиндрам с отдельной оцинковкой.',
+        ]),
   ].join('\n')
-  const responseFormattedContext =
-    compactMode && requested_invoice_items.length > 0 ? compactFormattedContext : formattedContext
+  const responseFormattedContext = shouldUseCompactResponse ? compactFormattedContext : formattedContext
 
   return NextResponse.json({
     query: rawQuery,
@@ -1271,9 +1298,9 @@ export async function GET(request: NextRequest) {
     nomenclature_accessories,
     requested_invoice_items,
     selection_guidance,
-    applicable_rules: compactMode ? applicable_rules.slice(0, 4) : applicable_rules,
+    applicable_rules: shouldUseCompactResponse ? applicable_rules.slice(0, 6) : applicable_rules,
     relevant_notes: notes,
-    document_chunks: compactMode ? [] : chunks,
+    document_chunks: shouldUseCompactResponse ? [] : chunks,
     formatted_context: responseFormattedContext,
     meta: {
       products_count: products.length,
@@ -1287,7 +1314,8 @@ export async function GET(request: NextRequest) {
       chunks_count:   chunks.length,
       brand_priority: BRAND_PRIORITY,
       requested_size_numbers: requestedSizeNumbers,
-      compact: compactMode,
+      compact: shouldUseCompactResponse,
+      requested_compact: compactMode,
     },
   })
 }
