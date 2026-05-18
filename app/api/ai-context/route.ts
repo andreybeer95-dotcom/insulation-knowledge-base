@@ -918,6 +918,7 @@ export async function GET(request: NextRequest) {
     answer_policy: [
       'Структура ответа менеджеру: 1) что найдено для счета по точным кодам 1С; 2) что является кандидатами в аналоги; 3) что нужно уточнить; 4) какие правила/техлисты ограничивают рекомендацию.',
       'Если в ответе есть requested_invoice_items, считать этот блок приоритетным для готового счета: это точные строки запроса, найденные по артикулам/кодам 1С.',
+      'Запрещено писать "нет в базе" по позиции, если она есть в requested_invoice_items. В таком случае нужно вывести найденный код 1С и артикул.',
       'Для счета использовать только позиции из relevant_nomenclature с кодом 1С. Не писать "нет в базе", пока не проверены relevant_nomenclature, nomenclature_accessories и точные размерные совпадения.',
       'Не писать "в наличии", если в контексте нет подтвержденного остатка/склада. Разрешено писать только "есть в номенклатуре 1С" или "найден код 1С".',
       'Если пользователь просит счет, сначала собрать основной вариант по точным кодам 1С, а аналоги вынести отдельным блоком "кандидаты для альтернативного счета".',
@@ -1307,6 +1308,17 @@ function buildContext(
   lines.push('⚠️ ВАЖНО: Всегда предлагать сопутствующие товары: мембрана + крепёж + анкера')
   lines.push('')
 
+  if (requestedInvoiceItems.length) {
+    lines.push('## ПРИОРИТЕТ ДЛЯ СЧЕТА: точные строки запроса найдены в 1С')
+    lines.push('Эти позиции уже найдены по артикулам/кодам. Не писать по ним "нет в базе" и не заменять их аналогами без запроса менеджера.')
+    for (const n of requestedInvoiceItems) {
+      const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
+      const articlePart = n.article ? ` | article: ${n.article}` : ''
+      lines.push(`- **${n.name ?? '—'}** (${codePart}${articlePart})`)
+    }
+    lines.push('')
+  }
+
   // Чанки — с новыми полями приоритета и типа документа
   if (chunks.length) {
     lines.push('## Из технической документации (PDF)')
@@ -1362,16 +1374,6 @@ function buildContext(
       const articlePart = n.article ? ` (article: ${n.article})` : ''
       const brandPart = n.brand ? ` | ${n.brand}` : ''
       lines.push(`- **${n.name ?? '—'}**${articlePart}${codePart}${brandPart}`)
-    }
-    lines.push('')
-  }
-
-  if (requestedInvoiceItems.length) {
-    lines.push('## Найденные позиции для счета по точным строкам запроса')
-    for (const n of requestedInvoiceItems) {
-      const codePart = n.code ? `code: ${n.code}` : 'code: —'
-      const articlePart = n.article ? ` | article: ${n.article}` : ''
-      lines.push(`- **${n.name ?? '—'}** (${codePart}${articlePart})`)
     }
     lines.push('')
   }
