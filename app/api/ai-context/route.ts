@@ -457,10 +457,20 @@ export async function GET(request: NextRequest) {
     brand: string | null
   }
 
+  type RequestedInvoiceLine = {
+    line: string
+    article: string
+    quantity: string | null
+    unit: string | null
+    found_item?: NomenclatureItem | null
+  }
+
   let relevant_nomenclature: NomenclatureItem[] = []
   let nomenclature_analogs: NomenclatureItem[] = []
   let nomenclature_accessories: NomenclatureItem[] = []
   let requested_invoice_items: NomenclatureItem[] = []
+  let requested_invoice_lines: RequestedInvoiceLine[] = []
+  let missing_invoice_items: RequestedInvoiceLine[] = []
 
   const getNomenclatureItemType = (name?: string | null) => {
     const lower = (name || '').toLowerCase()
@@ -523,6 +533,104 @@ export async function GET(request: NextRequest) {
 
   const isNomenclatureAccessory = (name?: string | null) =>
     ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
+
+  const normalizeInvoiceLine = (line: string) => line.replace(/\s+/g, ' ').trim()
+
+  const splitRequestedInvoiceLines = (text: string) => {
+    const physicalLines = text
+      .replace(/\r/g, '\n')
+      .split(/\n+/)
+      .map(normalizeInvoiceLine)
+      .filter(Boolean)
+
+    const joined = physicalLines.length > 1 ? physicalLines.join('\n') : text
+    const xotpipeParts = joined
+      .split(/(?=\bXOTPIPE\b)/i)
+      .map(normalizeInvoiceLine)
+      .filter((line) => /^XOTPIPE\b/i.test(line))
+
+    if (xotpipeParts.length > 1) return xotpipeParts
+
+    return physicalLines.filter((line) =>
+      /\bXOTPIPE\b|\bO-ME-ZN\b|\bSP[-\s]*\d{2,3}\b/i.test(line)
+    )
+  }
+
+  const getInvoiceQuantity = (line: string) => {
+    const match = line.match(/---\s*([\d,.]+)\s*([^\s]+(?:\s+[^\s]+)?)/i)
+    if (!match) return { quantity: null, unit: null }
+    return {
+      quantity: match[1].replace(',', '.'),
+      unit: normalizeInvoiceLine(match[2]),
+    }
+  }
+
+  const getInvoiceSize = (line: string) => {
+    const matches = Array.from(line.matchAll(/(\d{2,4})\s*[xх*]\s*(\d{1,4})(?:\s*[xх*]\s*(\d{3,4}))?/gi))
+    if (!matches.length) return null
+    const match = matches.find((item) => item[3]) ?? matches[0]
+    return {
+      first: match[1],
+      second: match[2],
+      third: match[3] ?? null,
+    }
+  }
+
+  const getInvoiceAngle = (line: string) =>
+    line.match(/\bL[-\s]*(?:1[-\s]*)?(30|45|60|90)\b/i)?.[1] ??
+    line.match(/отвод\s*(30|45|60|90)/i)?.[1] ??
+    null
+
+  const buildArticleFromInvoiceLine = (line: string) => {
+    const normalized = normalizeInvoiceLine(line)
+
+    const omeElbowMatch = normalized.match(/\bO-ME-ZN\s+L-1-(30|45|60|90)\s+(\d{2,4})\b/i)
+    if (omeElbowMatch) {
+      return `OMEZNL1${omeElbowMatch[1]}D${omeElbowMatch[2]}`
+    }
+
+    const omeShellMatch = normalized.match(/\bO-ME-ZN\s+(\d{2,4})\s*[xх*]\s*(\d{3,4})\b/i)
+    if (omeShellMatch) {
+      return `OMEZNLD${omeShellMatch[2]}-${omeShellMatch[1]}`
+    }
+
+    const spSeries = normalized.match(/\bSP[-\s]*(\d{2,3})\b/i)?.[1]
+    const size = getInvoiceSize(normalized)
+    if (!spSeries || !size) return null
+
+    // For invoice mode we generate an exact article only when the requested coating is explicit.
+    // Unknown coating stays unresolved instead of becoming a guessed счет position.
+    if (!/без\s+покрыт/i.test(normalized)) return null
+
+    const angle = getInvoiceAngle(normalized)
+    if (angle) {
+      return `SP${spSeries}L${angle}DT${size.first}-${size.second}`
+    }
+
+    if (/цилиндр|скорлуп|[xх*]\s*\d{3,4}\b/i.test(normalized)) {
+      return `SP${spSeries}L10DT${size.first}-${size.second}`
+    }
+
+    return null
+  }
+
+  const extractRequestedInvoiceLines = () => {
+    const lines = splitRequestedInvoiceLines(rawQuery)
+    const result: RequestedInvoiceLine[] = []
+    for (const line of lines) {
+      const article = buildArticleFromInvoiceLine(line)
+      if (!article) continue
+      const { quantity, unit } = getInvoiceQuantity(line)
+      result.push({
+        line,
+        article,
+        quantity,
+        unit,
+        found_item: null,
+      })
+    }
+    return result
+  }
 
   const addRequestedInvoiceArticles = (articles: Set<string>) => {
     const [firstSize, secondSize] = requestedSizeNumbers
@@ -870,8 +978,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const requestedInvoiceArticles = new Set<string>()
-    addRequestedInvoiceArticles(requestedInvoiceArticles)
+    requested_invoice_lines = extractRequestedInvoiceLines()
+
+    const requestedInvoiceArticles = new Set<string>(
+      requested_invoice_lines.map((line) => line.article)
+    )
+
+    if (requestedInvoiceArticles.size === 0) {
+      addRequestedInvoiceArticles(requestedInvoiceArticles)
+    }
+
     if (requestedInvoiceArticles.size > 0) {
       const invoiceMatches = await Promise.all(
         Array.from(requestedInvoiceArticles).map((article) =>
@@ -885,6 +1001,16 @@ export async function GET(request: NextRequest) {
       requested_invoice_items = dedupeNomenclature(
         invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
       )
+      const invoiceItemByArticle = new Map(
+        requested_invoice_items
+          .filter((item) => item.article)
+          .map((item) => [item.article as string, item])
+      )
+      requested_invoice_lines = requested_invoice_lines.map((line) => ({
+        ...line,
+        found_item: invoiceItemByArticle.get(line.article) ?? null,
+      }))
+      missing_invoice_items = requested_invoice_lines.filter((line) => !line.found_item)
     }
   }
 
@@ -1079,6 +1205,8 @@ export async function GET(request: NextRequest) {
     ? sortRulesForTopic(relevantRules).slice(0, hasConstructionInsulationQueryForContext ? 12 : 20)
     : sortRulesForTopic(allRules.filter(r => r.is_prohibition && topicProhibitionMatches(r))).slice(0, 12);
 
+  const strictInvoiceMode = requested_invoice_lines.length > 0
+
   const selection_guidance = {
     clarification_needed: false,
     questions: [] as string[],
@@ -1124,6 +1252,22 @@ export async function GET(request: NextRequest) {
       'Наружный слой НФС: BASWOOL ВЕНТ ФАСАД 70/80/90. Для 3+ этажей и общественных зданий рассматривать двухслойную систему.',
     ]
     selection_guidance.recommendation_status = 'construction_manager_context'
+  }
+
+  if (strictInvoiceMode) {
+    selection_guidance.answer_policy = [
+      'Если missing_items не пустой, запрещено писать "все позиции найдены". Писать: "найдено X из Y, проверить: ...".',
+      'В счёт включать только позиции из invoice_lines со статусом found или из requested_invoice_items. Нельзя брать код 1С из кандидатов/аналогов для другой строки.',
+      'Ненайденную строку не заменять автоматически на другой угол, покрытие, серию или 2 x 45. Любая замена только как кандидат и только после согласования.',
+      ...selection_guidance.answer_policy,
+    ]
+
+    if (missing_invoice_items.length > 0) {
+      selection_guidance.clarification_needed = true
+      selection_guidance.questions.unshift(
+        `Проверить в 1С/у поставщика: ${missing_invoice_items.map((item) => item.article).join(', ')}.`
+      )
+    }
   }
 
   const hasUseCaseInQuery = /улиц|помещ|труб|отопл|хвс|гвс|вент|котельн|наруж|внутр|оцинк|фольг|нг|дренаж|дорог|откос|склон|асфальт|фундамент|кровл|фасад/i.test(rawQuery)
@@ -1200,6 +1344,28 @@ export async function GET(request: NextRequest) {
     nomenclature_accessories,
     requested_invoice_items
   )
+  if (strictInvoiceMode) {
+    const foundLines = requested_invoice_lines.filter((line) => line.found_item)
+    formattedContext += '\n\n## Строгая проверка строк счета по 1С\n'
+    formattedContext += `Найдено точных строк: ${foundLines.length} из ${requested_invoice_lines.length}.\n`
+    formattedContext += 'Использовать в счете только найденные строки. Если есть ненайденные строки, не писать "все позиции найдены".\n'
+    if (foundLines.length > 0) {
+      formattedContext += '\nНайдено:\n'
+      formattedContext += foundLines.map((line) => {
+        const item = line.found_item
+        const qtyPart = line.quantity ? ` | количество: ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
+        return `- ${item?.name ?? line.line} | код 1С: ${item?.code ?? '—'} | article: ${line.article}${qtyPart}`
+      }).join('\n')
+    }
+    if (missing_invoice_items.length > 0) {
+      formattedContext += '\n\nПроверить, точный код 1С не найден:\n'
+      formattedContext += missing_invoice_items.map((line) => {
+        const qtyPart = line.quantity ? ` | количество: ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
+        return `- ${line.line} | expected_article: ${line.article}${qtyPart}`
+      }).join('\n')
+      formattedContext += '\nАвтоматически не заменять на другой угол, покрытие, серию или 2 x 45.'
+    }
+  }
   if (selection_guidance.questions.length > 0) {
     formattedContext += '\n\n## Что нужно уточнить у менеджера\n'
     formattedContext += selection_guidance.questions.map(q => `- ${q}`).join('\n')
@@ -1237,13 +1403,36 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Правила подбора\n' + rulesText;
   }
 
-  const shortInvoiceItems = requested_invoice_items.length > 0
+  const shortInvoiceItems = strictInvoiceMode
+    ? requested_invoice_items
+    : requested_invoice_items.length > 0
     ? requested_invoice_items
     : relevant_nomenclature
+  const foundInvoiceLines = requested_invoice_lines.filter((line) => line.found_item)
+  const invoiceStatusLines = strictInvoiceMode
+    ? [
+        '',
+        '## Строгая проверка строк счета',
+        `- Найдено точных строк: ${foundInvoiceLines.length} из ${requested_invoice_lines.length}.`,
+        ...foundInvoiceLines.slice(0, 8).map((line) => {
+          const item = line.found_item
+          const qtyPart = line.quantity ? ` | ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
+          return `- Найдено: ${item?.name ?? line.line} (код 1С: ${item?.code ?? '-'} | article: ${line.article}${qtyPart})`
+        }),
+        ...missing_invoice_items.slice(0, 8).map((line) => {
+          const qtyPart = line.quantity ? ` | ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
+          return `- Проверить: ${line.line} (точный код 1С не найден | expected_article: ${line.article}${qtyPart})`
+        }),
+        ...(missing_invoice_items.length > 0
+          ? ['- Нельзя писать "все позиции найдены" и нельзя автоматически заменять на другой угол/покрытие/серию.']
+          : []),
+      ]
+    : []
   const shouldUseCompactResponse = compactMode || hasConstructionInsulationQueryForContext || isBareThicknessOnly
   const compactFormattedContext = [
     '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
+    ...invoiceStatusLines,
     '',
     '## Основные позиции 1С',
     ...(shortInvoiceItems.length > 0
@@ -1255,7 +1444,9 @@ export async function GET(request: NextRequest) {
       : ['- Точной позиции 1С в контексте нет. Основной вариант без кода не давать.']),
     '',
     '## Сопутствующие',
-    ...(nomenclature_accessories.length > 0
+    ...(strictInvoiceMode
+      ? ['- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
+      : nomenclature_accessories.length > 0
       ? nomenclature_accessories.slice(0, 6).map((n) => {
           const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: проверить'
           return `- **${n.name ?? '—'}** (${codePart})`
@@ -1285,15 +1476,39 @@ export async function GET(request: NextRequest) {
   const responseFormattedContext = shouldUseCompactResponse ? compactFormattedContext : formattedContext
   const compactRules = applicable_rules.slice(0, 6)
   const compactChunks = shouldUseCompactResponse ? [] : chunks
+  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
+  const accessoriesForTool = strictInvoiceMode ? [] : nomenclature_accessories
 
   if (toolResponseMode) {
     return NextResponse.json({
       context: responseFormattedContext,
-      main_items: relevant_nomenclature.slice(0, 8).map((item) => ({
+      main_items: mainItemsForTool.slice(0, 8).map((item) => ({
         code: item.code,
         article: item.article,
         name: item.name,
         brand: item.brand,
+      })),
+      invoice_lines: requested_invoice_lines.slice(0, 12).map((line) => ({
+        line: line.line,
+        article: line.article,
+        quantity: line.quantity,
+        unit: line.unit,
+        status: line.found_item ? 'found' : 'missing',
+        item: line.found_item
+          ? {
+              code: line.found_item.code,
+              article: line.found_item.article,
+              name: line.found_item.name,
+              brand: line.found_item.brand,
+            }
+          : null,
+      })),
+      missing_items: missing_invoice_items.slice(0, 12).map((line) => ({
+        line: line.line,
+        expected_article: line.article,
+        quantity: line.quantity,
+        unit: line.unit,
+        reason: 'exact_article_not_found',
       })),
       requested_invoice_items: requested_invoice_items.slice(0, 8).map((item) => ({
         code: item.code,
@@ -1301,7 +1516,7 @@ export async function GET(request: NextRequest) {
         name: item.name,
         brand: item.brand,
       })),
-      accessories: nomenclature_accessories.slice(0, 6).map((item) => ({
+      accessories: accessoriesForTool.slice(0, 6).map((item) => ({
         code: item.code,
         article: item.article,
         name: item.name,
@@ -1318,6 +1533,9 @@ export async function GET(request: NextRequest) {
         products_count: products.length,
         nomenclature_count: relevant_nomenclature.length,
         accessories_count: nomenclature_accessories.length,
+        strict_invoice: strictInvoiceMode,
+        invoice_lines_count: requested_invoice_lines.length,
+        missing_items_count: missing_invoice_items.length,
         rules_count: compactRules.length,
         chunks_count: compactChunks.length,
       },
@@ -1339,6 +1557,14 @@ export async function GET(request: NextRequest) {
     relevant_nomenclature,
     nomenclature_analogs,
     nomenclature_accessories,
+    invoice_lines: requested_invoice_lines,
+    missing_items: missing_invoice_items.map((line) => ({
+      line: line.line,
+      expected_article: line.article,
+      quantity: line.quantity,
+      unit: line.unit,
+      reason: 'exact_article_not_found',
+    })),
     requested_invoice_items,
     selection_guidance,
     applicable_rules: shouldUseCompactResponse ? compactRules : applicable_rules,
@@ -1351,6 +1577,9 @@ export async function GET(request: NextRequest) {
       nomenclature_analogs_count: nomenclature_analogs.length,
       nomenclature_accessories_count: nomenclature_accessories.length,
       requested_invoice_items_count: requested_invoice_items.length,
+      strict_invoice: strictInvoiceMode,
+      invoice_lines_count: requested_invoice_lines.length,
+      missing_items_count: missing_invoice_items.length,
       clarification_needed: selection_guidance.clarification_needed,
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
