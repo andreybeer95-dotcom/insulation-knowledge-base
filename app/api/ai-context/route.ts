@@ -439,6 +439,7 @@ export async function GET(request: NextRequest) {
   let relevant_nomenclature: NomenclatureItem[] = []
   let nomenclature_analogs: NomenclatureItem[] = []
   let nomenclature_accessories: NomenclatureItem[] = []
+  let requested_invoice_items: NomenclatureItem[] = []
 
   const getNomenclatureItemType = (name?: string | null) => {
     const lower = (name || '').toLowerCase()
@@ -501,6 +502,30 @@ export async function GET(request: NextRequest) {
 
   const isNomenclatureAccessory = (name?: string | null) =>
     ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
+
+  const addRequestedInvoiceArticles = (articles: Set<string>) => {
+    const [firstSize, secondSize] = requestedSizeNumbers
+    const hasXotpipeSp100 = /xotpipe|хотпайп/i.test(rawQuery) && /\bsp[-\s]*100\b/i.test(rawQuery)
+
+    if (hasXotpipeSp100 && firstSize && secondSize) {
+      if (/цилиндр/i.test(rawQuery) && /без покрыт/i.test(rawQuery)) {
+        articles.add(`SP100L10DT${firstSize}-${secondSize}`)
+      }
+      if (/l[-\s]*90|отвод\s*90/i.test(rawQuery) && /без покрыт/i.test(rawQuery)) {
+        articles.add(`SP100L90DT${firstSize}-${secondSize}`)
+      }
+    }
+
+    for (const match of rawQuery.matchAll(/O-ME-ZN\s+(\d{2,4})\s*[xх*]\s*(\d{3,4})/gi)) {
+      const diameter = match[1]
+      const length = match[2]
+      articles.add(`OMEZNLD${length}-${diameter}`)
+    }
+
+    for (const match of rawQuery.matchAll(/O-ME-ZN\s+L-1-90\s+(\d{2,4})/gi)) {
+      articles.add(`OMEZNL190D${match[1]}`)
+    }
+  }
 
   const getSizeFilters = (firstSize: string, secondSize: string) => [
     `name.ilike.% ${firstSize}x${secondSize}%`,
@@ -786,6 +811,23 @@ export async function GET(request: NextRequest) {
           .slice(0, 20)
       }
     }
+
+    const requestedInvoiceArticles = new Set<string>()
+    addRequestedInvoiceArticles(requestedInvoiceArticles)
+    if (requestedInvoiceArticles.size > 0) {
+      const invoiceMatches = await Promise.all(
+        Array.from(requestedInvoiceArticles).map((article) =>
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .eq('article', article)
+            .limit(1)
+        )
+      )
+      requested_invoice_items = dedupeNomenclature(
+        invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
+      )
+    }
   }
 
   // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
@@ -875,6 +917,7 @@ export async function GET(request: NextRequest) {
     questions: [] as string[],
     answer_policy: [
       'Структура ответа менеджеру: 1) что найдено для счета по точным кодам 1С; 2) что является кандидатами в аналоги; 3) что нужно уточнить; 4) какие правила/техлисты ограничивают рекомендацию.',
+      'Если в ответе есть requested_invoice_items, считать этот блок приоритетным для готового счета: это точные строки запроса, найденные по артикулам/кодам 1С.',
       'Для счета использовать только позиции из relevant_nomenclature с кодом 1С. Не писать "нет в базе", пока не проверены relevant_nomenclature, nomenclature_accessories и точные размерные совпадения.',
       'Не писать "в наличии", если в контексте нет подтвержденного остатка/склада. Разрешено писать только "есть в номенклатуре 1С" или "найден код 1С".',
       'Если пользователь просит счет, сначала собрать основной вариант по точным кодам 1С, а аналоги вынести отдельным блоком "кандидаты для альтернативного счета".',
@@ -942,7 +985,8 @@ export async function GET(request: NextRequest) {
     chunks,
     relevant_nomenclature,
     nomenclature_analogs,
-    nomenclature_accessories
+    nomenclature_accessories,
+    requested_invoice_items
   )
   if (selection_guidance.questions.length > 0) {
     formattedContext += '\n\n## Что нужно уточнить у менеджера\n'
@@ -977,6 +1021,7 @@ export async function GET(request: NextRequest) {
     relevant_nomenclature,
     nomenclature_analogs,
     nomenclature_accessories,
+    requested_invoice_items,
     selection_guidance,
     applicable_rules,
     relevant_notes: notes,
@@ -987,6 +1032,7 @@ export async function GET(request: NextRequest) {
       nomenclature_count: relevant_nomenclature.length,
       nomenclature_analogs_count: nomenclature_analogs.length,
       nomenclature_accessories_count: nomenclature_accessories.length,
+      requested_invoice_items_count: requested_invoice_items.length,
       clarification_needed: selection_guidance.clarification_needed,
       rules_count:    applicable_rules.length,
       notes_count:    notes.length,
@@ -1248,7 +1294,8 @@ function buildContext(
   chunks: ChunkRow[],
   nomenclature: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = [],
   nomenclatureAnalogs: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = [],
-  nomenclatureAccessories: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = []
+  nomenclatureAccessories: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = [],
+  requestedInvoiceItems: { id: string; code?: string | null; article?: string | null; name?: string | null; brand?: string | null }[] = []
 ): string {
   const lines: string[] = [`# База знаний — контекст\n**Запрос:** ${query}\n`]
   lines.push('## Приоритет брендов для предложения менеджеру')
@@ -1311,8 +1358,20 @@ function buildContext(
   if (nomenclature.length) {
     lines.push('## Номенклатура 1С')
     for (const n of nomenclature) {
+      const codePart = n.code ? ` | код 1С: ${n.code}` : ' | код 1С не найден'
       const articlePart = n.article ? ` (article: ${n.article})` : ''
-      lines.push(`- **${n.name ?? '—'}**${articlePart}`)
+      const brandPart = n.brand ? ` | ${n.brand}` : ''
+      lines.push(`- **${n.name ?? '—'}**${articlePart}${codePart}${brandPart}`)
+    }
+    lines.push('')
+  }
+
+  if (requestedInvoiceItems.length) {
+    lines.push('## Найденные позиции для счета по точным строкам запроса')
+    for (const n of requestedInvoiceItems) {
+      const codePart = n.code ? `code: ${n.code}` : 'code: —'
+      const articlePart = n.article ? ` | article: ${n.article}` : ''
+      lines.push(`- **${n.name ?? '—'}** (${codePart}${articlePart})`)
     }
     lines.push('')
   }
@@ -1320,9 +1379,10 @@ function buildContext(
   if (nomenclatureAnalogs.length) {
     lines.push('## Аналоги из номенклатуры 1С')
     for (const n of nomenclatureAnalogs) {
+      const codePart = n.code ? ` | код 1С: ${n.code}` : ' | код 1С не найден'
       const articlePart = n.article ? ` (article: ${n.article})` : ''
       const brandPart = n.brand ? ` | ${n.brand}` : ''
-      lines.push(`- **${n.name ?? '—'}**${articlePart}${brandPart}`)
+      lines.push(`- **${n.name ?? '—'}**${articlePart}${codePart}${brandPart}`)
     }
     lines.push('')
   }
@@ -1330,9 +1390,10 @@ function buildContext(
   if (nomenclatureAccessories.length) {
     lines.push('## Сопутствующие товары / аксессуары 1С')
     for (const n of nomenclatureAccessories) {
+      const codePart = n.code ? ` | код 1С: ${n.code}` : ' | код 1С не найден'
       const articlePart = n.article ? ` (article: ${n.article})` : ''
       const brandPart = n.brand ? ` | ${n.brand}` : ''
-      lines.push(`- **${n.name ?? '—'}**${articlePart}${brandPart}`)
+      lines.push(`- **${n.name ?? '—'}**${articlePart}${codePart}${brandPart}`)
     }
     lines.push('')
   }
