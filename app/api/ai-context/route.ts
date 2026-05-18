@@ -58,6 +58,9 @@ export async function GET(request: NextRequest) {
 
   // старые параметры (обратная совместимость)
   const rawQuery = searchParams.get('query') || searchParams.get('q') || ''
+  const compactMode = ['1', 'true', 'yes', 'invoice'].includes(
+    (searchParams.get('compact') || searchParams.get('mode') || '').toLowerCase()
+  )
 
   // Очищаем вопрос — убираем стоп-слова и оставляем ключевые термины
   function extractKeywords(text: string): string {
@@ -1009,6 +1012,26 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Правила подбора\n' + rulesText;
   }
 
+  const compactFormattedContext = [
+    '# Короткий контекст для счета',
+    `**Запрос:** ${rawQuery}`,
+    '',
+    '## Точные позиции 1С',
+    ...requested_invoice_items.map((n) => {
+      const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
+      const articlePart = n.article ? ` | article: ${n.article}` : ''
+      return `- **${n.name ?? '—'}** (${codePart}${articlePart})`
+    }),
+    '',
+    '## Правила ответа',
+    '- Если позиция есть в списке точных позиций 1С, запрещено писать "нет в базе".',
+    '- XOTPIPE без покрытия + оцинкованная окожушка O-ME-ZN допустимо.',
+    '- Запрет "фольга + оцинковка" относится только к Alu/Alu1/фольгированным цилиндрам с отдельной оцинковкой.',
+    '- Не писать "в наличии", если нет подтвержденного остатка.',
+  ].join('\n')
+  const responseFormattedContext =
+    compactMode && requested_invoice_items.length > 0 ? compactFormattedContext : formattedContext
+
   return NextResponse.json({
     query: rawQuery,
     query_keywords: query,
@@ -1026,10 +1049,10 @@ export async function GET(request: NextRequest) {
     nomenclature_accessories,
     requested_invoice_items,
     selection_guidance,
-    applicable_rules,
+    applicable_rules: compactMode ? applicable_rules.slice(0, 4) : applicable_rules,
     relevant_notes: notes,
-    document_chunks: chunks,
-    formatted_context: formattedContext,
+    document_chunks: compactMode ? [] : chunks,
+    formatted_context: responseFormattedContext,
     meta: {
       products_count: products.length,
       nomenclature_count: relevant_nomenclature.length,
@@ -1042,6 +1065,7 @@ export async function GET(request: NextRequest) {
       chunks_count:   chunks.length,
       brand_priority: BRAND_PRIORITY,
       requested_size_numbers: requestedSizeNumbers,
+      compact: compactMode,
     },
   })
 }
