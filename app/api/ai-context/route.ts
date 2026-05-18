@@ -417,19 +417,45 @@ export async function GET(request: NextRequest) {
   }
 
   const isGeotextileNomenclature = (name?: string | null) =>
-    /геотекст|геоткан|дорнит|геоком|georex|полотно иглопробивное/i.test(name || '')
+    /геотекст|геоткан|дорнит|геоком|georex|полотно иглопробивное/i.test(name || '') &&
+    !/геореш[её]тк|геомембран/i.test(name || '')
+
+  const hasGeotextileDensity = (name: string | null | undefined, density: string) => {
+    const text = name || ''
+    if (new RegExp(`(^|\\D)${density}\\s*(?:м2|м²|m2)(\\D|$)`, 'i').test(text)) return false
+
+    const densityUnitPattern = new RegExp(`(^|\\D)${density}\\s*(?:г|гр|g)\\s*\\/?\\s*(?:м2|м²|кв\\.?\\s*м|m2)(\\D|$)`, 'i')
+    const productDensityPattern = new RegExp(`(?:геотекст|геоткан|дорнит|геоком|georex|пэ|пэт|пфг|a-)\\D{0,24}${density}(\\D|$)`, 'i')
+    return densityUnitPattern.test(text) || productDensityPattern.test(text)
+  }
 
   const isXpsNomenclature = (name?: string | null) =>
-    /xps|экструзи|экструдир|пенопл[еэ]кс|техноплекс|carbon/i.test(name || '')
+    /xps|экструзия|экструзионн|пенопл[еэ]кс|техноплекс|carbon|ursa n|калкан/i.test(name || '') &&
+    !/геомембран|мембран|геотекст|геореш[её]тк|цилиндр|rockwool|роквул/i.test(name || '')
 
   const hasBoardThickness = (name: string | null | undefined, thickness: string) => {
     const text = name || ''
     const patterns = [
-      new RegExp(`[xх*]\\s*${thickness}\\s*(мм|\\)|\\s|,|$)`, 'i'),
+      new RegExp(`\\d{3,4}\\s*[xх*]\\s*${thickness}\\s*(мм|\\)|\\s|,|$)`, 'i'),
       new RegExp(`(^|\\D)${thickness}\\s*(мм|$)`, 'i'),
-      new RegExp(`(^|\\D)${thickness}\\s*[xх*]\\s*\\d{3,4}`, 'i'),
+      new RegExp(`(^|\\D)${thickness}\\s*[xх*]\\s*\\d{3,4}\\s*[xх*]\\s*\\d{3,4}(\\D|$)`, 'i'),
+      new RegExp(`(^|\\D)\\d+\\s*\\/\\s*${thickness}\\s*[xх*]\\s*\\d{3,4}`, 'i'),
     ]
     return patterns.some((pattern) => pattern.test(text))
+  }
+
+  const dedupeNomenclature = (items: NomenclatureItem[]) => {
+    const seen = new Set<string>()
+    const result: NomenclatureItem[] = []
+    for (const item of items) {
+      const key = item.code
+        ? `code:${item.code}`
+        : `text:${(item.name || '').replace(/\s+/g, ' ').trim().toLowerCase()}|${item.brand || ''}|${item.article || ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(item)
+    }
+    return result
   }
 
   const isNomenclatureAccessory = (name?: string | null) =>
@@ -514,7 +540,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { data: nomData } = await nomQuery
-    relevant_nomenclature = nomData ?? []
+    relevant_nomenclature = dedupeNomenclature(nomData ?? [])
 
     const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
     const hasXpsInQuery = /xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)
@@ -581,7 +607,7 @@ export async function GET(request: NextRequest) {
             !nomBrand ||
             item.brand === nomBrand ||
             (nomBrand === 'ДОРНИТ' && !item.brand && /дорнит/.test(brandOrName))
-          return matchesRequestedBrand && isGeotextileNomenclature(item.name) && hasStandaloneNumber(item.name || '', singleValue)
+          return matchesRequestedBrand && isGeotextileNomenclature(item.name) && hasGeotextileDensity(item.name, singleValue)
         }
         if (hasXpsInQuery) {
           const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
@@ -596,6 +622,8 @@ export async function GET(request: NextRequest) {
 
       relevant_nomenclature = broadNomenclature
         .filter(matchesSpecialQuery)
+        .filter((item) => item.code !== 'ЦБ50593')
+      relevant_nomenclature = dedupeNomenclature(relevant_nomenclature)
         .slice(0, 20)
 
       const relevantSpecialIds = new Set(relevant_nomenclature.map((item) => item.id))
@@ -607,7 +635,7 @@ export async function GET(request: NextRequest) {
             const isRequestedBrand =
               nomBrand &&
               (item.brand === nomBrand || (nomBrand === 'ДОРНИТ' && /дорнит/.test(brandOrName)))
-            return !isRequestedBrand && isGeotextileNomenclature(item.name) && hasStandaloneNumber(item.name || '', singleValue)
+            return !isRequestedBrand && isGeotextileNomenclature(item.name) && hasGeotextileDensity(item.name, singleValue)
           }
           if (hasXpsInQuery) {
             const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
@@ -619,6 +647,7 @@ export async function GET(request: NextRequest) {
           return false
         })
         .filter((item) => !nomBrand || item.brand !== nomBrand)
+      nomenclature_analogs = dedupeNomenclature(nomenclature_analogs)
         .slice(0, 20)
     }
 
@@ -700,9 +729,9 @@ export async function GET(request: NextRequest) {
       }
       const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
 
-      nomenclature_accessories = accessoryCandidateNomenclature
+      nomenclature_accessories = dedupeNomenclature(accessoryCandidateNomenclature
         .filter((item) => !relevantIds.has(item.id))
-        .filter((item) => isNomenclatureAccessory(item.name))
+        .filter((item) => isNomenclatureAccessory(item.name)))
         .slice(0, 20)
 
       const needsCylinderAnalogs =
@@ -710,9 +739,9 @@ export async function GET(request: NextRequest) {
         /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
 
       if (needsCylinderAnalogs) {
-        nomenclature_analogs = analogCandidateNomenclature
+        nomenclature_analogs = dedupeNomenclature(analogCandidateNomenclature
           .filter((item) => !relevantIds.has(item.id))
-          .filter((item) => getNomenclatureItemType(item.name) === 'cylinder')
+          .filter((item) => getNomenclatureItemType(item.name) === 'cylinder'))
           .slice(0, 20)
       }
     }
