@@ -521,13 +521,59 @@ export async function GET(request: NextRequest) {
 
     if (queryNumbers.length === 1 && (hasGeotextileInQuery || hasXpsInQuery)) {
       const [singleValue] = queryNumbers
-      const broadNomenclatureRes = await supabase
-        .from('nomenclature_1c')
-        .select('id, code, article, name, brand')
-        .ilike('name', `%${singleValue}%`)
-        .limit(1500)
+      const specialQueries = []
 
-      const broadNomenclature = (broadNomenclatureRes.data ?? []) as NomenclatureItem[]
+      if (hasGeotextileInQuery) {
+        specialQueries.push(
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .ilike('name', `%${singleValue}%`)
+            .or('name.ilike.%геотекст%,name.ilike.%геоткан%,name.ilike.%дорнит%,name.ilike.%геоком%,name.ilike.%georex%')
+            .limit(1000)
+        )
+        if (nomBrand) {
+          specialQueries.push(
+            supabase
+              .from('nomenclature_1c')
+              .select('id, code, article, name, brand')
+              .eq('brand', nomBrand)
+              .ilike('name', `%${singleValue}%`)
+              .limit(500)
+          )
+        }
+      }
+
+      if (hasXpsInQuery) {
+        specialQueries.push(
+          supabase
+            .from('nomenclature_1c')
+            .select('id, code, article, name, brand')
+            .ilike('name', `%${singleValue}%`)
+            .or('name.ilike.%xps%,name.ilike.%экструзи%,name.ilike.%экструдир%,name.ilike.%пенопл%,name.ilike.%техноплекс%,name.ilike.%carbon%')
+            .limit(1000)
+        )
+        if (nomBrand) {
+          specialQueries.push(
+            supabase
+              .from('nomenclature_1c')
+              .select('id, code, article, name, brand')
+              .eq('brand', nomBrand)
+              .ilike('name', `%${singleValue}%`)
+              .limit(500)
+          )
+        }
+      }
+
+      const specialResults = await Promise.all(specialQueries)
+      const broadNomenclatureById = new Map<string, NomenclatureItem>()
+      for (const result of specialResults) {
+        for (const item of ((result.data ?? []) as NomenclatureItem[])) {
+          broadNomenclatureById.set(item.id, item)
+        }
+      }
+
+      const broadNomenclature = Array.from(broadNomenclatureById.values())
       const matchesSpecialQuery = (item: NomenclatureItem) => {
         if (hasGeotextileInQuery) {
           const brandOrName = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
