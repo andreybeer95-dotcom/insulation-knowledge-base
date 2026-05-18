@@ -337,6 +337,21 @@ export async function GET(request: NextRequest) {
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
   const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
   const allKeywords = [...meaningfulKeywords, ...requestedSizeNumbers]
+  const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+  const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг/i.test(rawQuery)
+  const hasConstructionInsulationQueryForNomenclature =
+    !hasCylinderQueryForNomenclature &&
+    (
+      hasVentFacadeQueryForNomenclature ||
+      /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
+    )
+  const isBareThicknessOnly =
+    queryNumbers.length === 1 &&
+    /^(?:\s*(?:толщина|толщиной|утеплитель|мм|mm)\s*)*\d{2,3}\s*(?:мм|mm)?\s*$/i.test(rawQuery)
+  const constructionThicknesses = queryNumbers.filter((n) => {
+    const value = Number(n)
+    return value >= 30 && value <= 300
+  })
 
   const hasExactSizeInText = (text: string, firstSize: string, secondSize: string) => {
     const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
@@ -547,7 +562,44 @@ export async function GET(request: NextRequest) {
     return hasExactSizeInText(text, firstSize, secondSize)
   }
 
-  if (queryNumbers.length > 0) {
+  const getBoardThickness = (name?: string | null) => {
+    const text = name || ''
+    const matches = Array.from(text.matchAll(/[xх*]\s*(\d{2,3})(?=\D|$)/gi))
+    const last = matches.length > 0 ? matches[matches.length - 1]?.[1] : undefined
+    return last ? Number(last) : null
+  }
+
+  const getBaswoolFacadeDensity = (name?: string | null) => {
+    const text = name || ''
+    const rawDensity = text.match(/ВЕНТ\s+ФАСАД\s*(\d{2,3})/i)?.[1]
+    return rawDensity ? Number(rawDensity) : null
+  }
+
+  const sortBaswoolFacade = (items: NomenclatureItem[], preferredThicknesses: string[]) => {
+    const thicknessPreference = preferredThicknesses.map(Number).filter(Boolean)
+    const densityPreference = [90, 80, 70]
+    return [...items].sort((a, b) => {
+      const aThickness = getBoardThickness(a.name)
+      const bThickness = getBoardThickness(b.name)
+      const aThicknessRank = aThickness ? thicknessPreference.indexOf(aThickness) : -1
+      const bThicknessRank = bThickness ? thicknessPreference.indexOf(bThickness) : -1
+      const normalizedAThicknessRank = aThicknessRank === -1 ? 99 : aThicknessRank
+      const normalizedBThicknessRank = bThicknessRank === -1 ? 99 : bThicknessRank
+      if (normalizedAThicknessRank !== normalizedBThicknessRank) return normalizedAThicknessRank - normalizedBThicknessRank
+
+      const aDensity = getBaswoolFacadeDensity(a.name)
+      const bDensity = getBaswoolFacadeDensity(b.name)
+      const aDensityRank = aDensity ? densityPreference.indexOf(aDensity) : -1
+      const bDensityRank = bDensity ? densityPreference.indexOf(bDensity) : -1
+      const normalizedADensityRank = aDensityRank === -1 ? 99 : aDensityRank
+      const normalizedBDensityRank = bDensityRank === -1 ? 99 : bDensityRank
+      if (normalizedADensityRank !== normalizedBDensityRank) return normalizedADensityRank - normalizedBDensityRank
+
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
+  }
+
+  if (queryNumbers.length > 0 && !isBareThicknessOnly) {
     let nomQuery = supabase
       .from('nomenclature_1c')
       .select('id, code, article, name, brand')
@@ -833,9 +885,68 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (hasVentFacadeQueryForNomenclature) {
+    const preferredThicknesses = constructionThicknesses.length > 0
+      ? constructionThicknesses
+      : ['150', '100']
+    const thicknessFilters = preferredThicknesses.flatMap((thickness) => [
+      `name.ilike.%*${thickness}%`,
+      `name.ilike.%х${thickness}%`,
+      `name.ilike.%-${thickness}%`,
+    ]).join(',')
+
+    let facadeQuery = supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .eq('brand', 'BASWOOL')
+      .ilike('name', '%ВЕНТ ФАСАД%')
+      .limit(60)
+
+    if (thicknessFilters) {
+      facadeQuery = facadeQuery.or(thicknessFilters)
+    }
+
+    const [{ data: facadeData }, { data: membraneData }, { data: bolgirusData }] = await Promise.all([
+      facadeQuery,
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .eq('code', 'ЦВ000206651')
+        .limit(1),
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%Болгирус%,name.ilike.%BOLGARYS%,name.ilike.%Bolgarys%')
+        .limit(10),
+    ])
+
+    const facadeItems = sortBaswoolFacade((facadeData ?? []) as NomenclatureItem[], preferredThicknesses)
+    const existingVentFacadeItems = relevant_nomenclature.filter((item) =>
+      /ВЕНТ\s+ФАСАД/i.test(item.name || '')
+    )
+    relevant_nomenclature = dedupeNomenclature([
+      ...facadeItems,
+      ...existingVentFacadeItems,
+    ]).slice(0, 20)
+
+    nomenclature_accessories = dedupeNomenclature([
+      ...((membraneData ?? []) as NomenclatureItem[]),
+      ...((bolgirusData ?? []) as NomenclatureItem[]),
+      ...nomenclature_accessories,
+    ])
+      .filter((item) => !/силма/i.test(item.name || ''))
+      .slice(0, 20)
+  }
+
   // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
-  if (relevant_nomenclature.length > 0 && queryNumbers.length > 0) {
+  if (relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature)) {
     products = []
+  }
+  if (isBareThicknessOnly) {
+    products = []
+    relevant_nomenclature = []
+    nomenclature_analogs = []
+    nomenclature_accessories = []
   }
 
   // ─── параллельные запросы ─────────────────────────────────
@@ -871,7 +982,9 @@ export async function GET(request: NextRequest) {
 
   const hasGeotextileQueryForContext = /геотекст|дорнит|геоткан/i.test(rawQuery)
   const hasXpsQueryForContext = /xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)
-  const hasCylinderQueryForContext = /цилиндр|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+  const hasCylinderQueryForContext = hasCylinderQueryForNomenclature
+  const hasVentFacadeQueryForContext = hasVentFacadeQueryForNomenclature
+  const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
@@ -885,7 +998,9 @@ export async function GET(request: NextRequest) {
     return true
   }
 
-  const chunks = deduplicateChunks(rawChunks.filter(chunkMatchesQueryTheme), limitChunks)
+  const chunks = isBareThicknessOnly
+    ? []
+    : deduplicateChunks(rawChunks.filter(chunkMatchesQueryTheme), limitChunks)
   const { data: rulesData } = await supabase
     .from('selection_rules')
     .select('id, rule_name, condition, rule_text, priority, is_prohibition, category')
@@ -895,12 +1010,58 @@ export async function GET(request: NextRequest) {
 
   // Фильтруем правила релевантные запросу
   const queryLower = query.toLowerCase();
-  const relevantRules = allRules.filter(rule => {
+  const ruleMatchesCurrentTopic = (rule: any) => {
+    const category = String(rule.category || '').toLowerCase()
+    const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+
+    if (hasVentFacadeQueryForContext) {
+      if (/стандарт/i.test(haystack) && !/без кода|не основн|запрет/i.test(haystack)) {
+        return false
+      }
+      return ['общестрой', 'теплоизоляция', ''].includes(category) &&
+        /вент|нфс|навесн|сайдинг|мембран|georex|болгирус|bolgarys|силма|без кода|не основн/i.test(haystack)
+    }
+    if (hasConstructionInsulationQueryForContext) {
+      return ['общестрой', 'теплоизоляция', ''].includes(category)
+    }
+    if (hasGeotextileQueryForContext) {
+      return ['геосинтетика', ''].includes(category)
+    }
+    if (hasXpsQueryForContext) {
+      return ['теплоизоляция', 'гидроизоляция', 'общестрой', ''].includes(category)
+    }
+    if (hasCylinderQueryForContext) {
+      return ['цилиндры', 'теплоизоляция', ''].includes(category)
+    }
+    return true
+  }
+
+  const relevantRules = isBareThicknessOnly ? [] : allRules.filter(rule => {
+    if (!ruleMatchesCurrentTopic(rule)) return false
     const conditions = rule.condition.toLowerCase().split(/[,+\s]+/);
     return conditions.some((cond: string) =>
       cond.length > 2 && queryLower.includes(cond)
     );
   });
+
+  const sortRulesForTopic = (rules: any[]) => {
+    if (!hasConstructionInsulationQueryForContext) return rules
+    return [...rules].sort((a, b) => {
+      const score = (rule: any) => {
+        const category = String(rule.category || '').toLowerCase()
+        const haystack = `${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+        let value = Number(rule.priority ?? 99) * 10
+        if (category === 'общестрой') value -= 40
+        if (/вент|нфс|навесн|сайдинг/i.test(haystack)) value -= 20
+        if (/baswool|басвул/i.test(haystack)) value -= 5
+        if (/без кода|не основн/i.test(haystack)) value -= 15
+        if (/мембран|georex|болгирус|bolgarys/i.test(haystack)) value -= 10
+        if (/сфтк|штукатур|рокфасад|руф|сэндвич/i.test(haystack)) value += 50
+        return value
+      }
+      return score(a) - score(b)
+    })
+  }
 
   const topicProhibitionMatches = (rule: any) => {
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
@@ -911,20 +1072,22 @@ export async function GET(request: NextRequest) {
   }
 
   // Если релевантных нет — берём только тематические запреты, а не всю базу правил.
-  const applicable_rules = relevantRules.length > 0
-    ? relevantRules
-    : allRules.filter(r => r.is_prohibition && topicProhibitionMatches(r));
+  const applicable_rules = isBareThicknessOnly ? [] : relevantRules.length > 0
+    ? sortRulesForTopic(relevantRules).slice(0, hasConstructionInsulationQueryForContext ? 12 : 20)
+    : sortRulesForTopic(allRules.filter(r => r.is_prohibition && topicProhibitionMatches(r))).slice(0, 12);
 
   const selection_guidance = {
     clarification_needed: false,
     questions: [] as string[],
     answer_policy: [
-      'Структура ответа менеджеру: 1) что найдено для счета по точным кодам 1С; 2) что является кандидатами в аналоги; 3) что нужно уточнить; 4) какие правила/техлисты ограничивают рекомендацию.',
+      'Структура ответа менеджеру: 1) рекомендация; 2) код 1С; 3) сопутствующие товары; 4) что уточнить; 5) коротко почему.',
+      'Отвечать коротко: обычно 5-8 строк. Не писать учебные объяснения, длинные характеристики, лямбды и прочность, если менеджер прямо не спросил.',
       'Если в ответе есть requested_invoice_items, считать этот блок приоритетным для готового счета: это точные строки запроса, найденные по артикулам/кодам 1С.',
       'Запрещено писать "нет в базе" по позиции, если она есть в requested_invoice_items. В таком случае нужно вывести найденный код 1С и артикул.',
       'Для цилиндров XOTPIPE система "без покрытия + оцинкованная окожушка" допустима и является правильным вариантом для улицы/защиты. Запрет "фольга + оцинковка" относится только к цилиндрам с покрытиями Alu/Alu1/фольга вместе с отдельной оцинкованной окожушкой.',
       'Нельзя применять правило "фольга + оцинковка" к цилиндрам без покрытия. Если в запросе "без покрытия + O-ME-ZN", писать, что комбинация допустима.',
-      'Для счета использовать только позиции из relevant_nomenclature с кодом 1С. Не писать "нет в базе", пока не проверены relevant_nomenclature, nomenclature_accessories и точные размерные совпадения.',
+      'Основной вариант для счета давать только из requested_invoice_items или relevant_nomenclature с кодом 1С. Позиции без кода 1С можно писать только как "кандидат, код нужно проверить".',
+      'Не писать "нет в базе", пока не проверены relevant_nomenclature, nomenclature_accessories и точные размерные совпадения.',
       'Не писать "в наличии", если в контексте нет подтвержденного остатка/склада. Разрешено писать только "есть в номенклатуре 1С" или "найден код 1С".',
       'Если пользователь просит счет, сначала собрать основной вариант по точным кодам 1С, а аналоги вынести отдельным блоком "кандидаты для альтернативного счета".',
     ],
@@ -943,16 +1106,48 @@ export async function GET(request: NextRequest) {
     recommendation_status: 'candidate_context_only',
   }
 
+  if (hasConstructionInsulationQueryForContext) {
+    selection_guidance.answer_policy = [
+      'Ответ менеджеру держать коротким: рекомендация, код 1С, сопутствующие товары, 1 короткая причина.',
+      'Основной вариант можно давать только с кодом 1С из контекста. Если кода нет — не ставить позицию основным вариантом, писать "код нужно проверить".',
+      'По минвате первым предлагать BASWOOL, вторым ROCKWOOL. ТЕХНОНИКОЛЬ по минвате не ставить первым; использовать прежде всего для XPS, гидроизоляции и профильных серий.',
+      'Для вентфасада всегда проверить мембрану и фасадный крепёж. GEOREX NG можно предложить как НГ-мембрану, если проект требует мембрану.',
+      'Фасадный крепёж: продвигать Болгирус. Если кода 1С Болгирус нет в контексте, написать "код Болгирус нужно проверить"; Силму не ставить основным вариантом.',
+      'Не расписывать λ, плотность, прочность и длинное обоснование, если менеджер прямо не запросил техническое сравнение.',
+    ]
+    selection_guidance.analog_policy = [
+      'ROCKWOOL давать как альтернативу после BASWOOL, если нужен второй вариант.',
+      'BASWOOL ЛАЙТ 35/45 допустим только как внутренний слой двухслойной НФС, не как наружный слой.',
+      'Наружный слой НФС: BASWOOL ВЕНТ ФАСАД 70/80/90. Для 3+ этажей и общественных зданий рассматривать двухслойную систему.',
+    ]
+    selection_guidance.recommendation_status = 'construction_manager_context'
+  }
+
   const hasUseCaseInQuery = /улиц|помещ|труб|отопл|хвс|гвс|вент|котельн|наруж|внутр|оцинк|фольг|нг|дренаж|дорог|откос|склон|асфальт|фундамент|кровл|фасад/i.test(rawQuery)
   const hasCylinderInResult = relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder')
   const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
 
   if (queryNumbers.length === 0) {
     selection_guidance.clarification_needed = true
-    selection_guidance.questions.push('Уточните размер/плотность/толщину материала, без этого можно показать только общий раздел номенклатуры.')
+    if (hasConstructionInsulationQueryForContext) {
+      selection_guidance.questions.push('Уточните толщину утепления и регион строительства.')
+      if (hasVentFacadeQueryForContext) {
+        selection_guidance.questions.push('Уточните, это полноценная НФС или обычная обрешетка под сайдинг.')
+      }
+    } else {
+      selection_guidance.questions.push('Уточните размер/плотность/толщину материала, без этого можно показать только общий раздел номенклатуры.')
+    }
   }
 
-  if (relevant_nomenclature.length > 1) {
+  if (isBareThicknessOnly) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions = [
+      'Уточните, к какому подбору относится толщина 150: вентфасад, кровля, XPS или цилиндры.',
+      'Если это продолжение диалога по вентфасаду, повторите коротко: "вентфасад сайдинг 150".',
+    ]
+  }
+
+  if (relevant_nomenclature.length > 1 && !hasConstructionInsulationQueryForContext) {
     selection_guidance.clarification_needed = true
     selection_guidance.questions.push('Найдено несколько позиций одного размера. Уточните точный вариант, который нужен клиенту.')
   }
@@ -983,6 +1178,14 @@ export async function GET(request: NextRequest) {
     selection_guidance.questions.push('Сопутствующие товары пока являются кандидатами по размеру. Чтобы рекомендовать их клиенту, уточните решение и место применения.')
   }
 
+  if (hasVentFacadeQueryForContext) {
+    if (!/мембран|нг|ветрозащит/i.test(rawQuery)) {
+      selection_guidance.questions.push('Проверьте по проекту, нужна ли НГ/ветрозащитная мембрана.')
+    }
+    selection_guidance.questions = Array.from(new Set(selection_guidance.questions)).slice(0, 3)
+    selection_guidance.clarification_needed = selection_guidance.questions.length > 0
+  }
+
   let formattedContext = buildContext(
     query,
     products,
@@ -997,6 +1200,25 @@ export async function GET(request: NextRequest) {
   if (selection_guidance.questions.length > 0) {
     formattedContext += '\n\n## Что нужно уточнить у менеджера\n'
     formattedContext += selection_guidance.questions.map(q => `- ${q}`).join('\n')
+  }
+  formattedContext += '\n\n## Жесткий контракт ответа менеджеру\n'
+  formattedContext += [
+    '- Максимум 5-8 строк, без длинных учебных объяснений.',
+    '- Порядок: рекомендация -> код 1С -> сопутствующие -> уточнить -> почему.',
+    '- Основной вариант только с кодом 1С из контекста. Без кода 1С — только кандидат/проверить код.',
+    '- Если нужны вопросы, задать максимум 2-3 вопроса.',
+    '- Не писать "в наличии", если в контексте нет подтвержденного остатка.',
+  ].join('\n')
+  if (hasConstructionInsulationQueryForContext) {
+    formattedContext += '\n\n## Шаблон короткого ответа по общестрою\n'
+    formattedContext += [
+      'Рекомендация: <материал из 1С> — код <код 1С>.',
+      'Альтернатива: <материал> — код <код 1С>, если есть.',
+      'Сопутствующие: <мембрана/крепеж/другое> — код <код 1С или "код проверить">.',
+      'Уточнить: <1-2 вопроса, только если без них нельзя выставить счет>.',
+      'Почему: <одно короткое предложение>.',
+      'Не использовать как основной вариант материалы без кода 1С, даже если они технически подходят.',
+    ].map(line => `- ${line}`).join('\n')
   }
   formattedContext += '\n\n## Как отвечать менеджеру\n'
   formattedContext += selection_guidance.answer_policy.map(q => `- ${q}`).join('\n')
