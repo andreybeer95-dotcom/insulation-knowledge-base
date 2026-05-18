@@ -61,6 +61,9 @@ export async function GET(request: NextRequest) {
   const compactMode = ['1', 'true', 'yes', 'invoice'].includes(
     (searchParams.get('compact') || searchParams.get('mode') || '').toLowerCase()
   )
+  const toolResponseMode = ['tool', 'n8n', 'agent', 'short'].includes(
+    (searchParams.get('response') || searchParams.get('format') || '').toLowerCase()
+  )
 
   // Очищаем вопрос — убираем стоп-слова и оставляем ключевые термины
   function extractKeywords(text: string): string {
@@ -1280,6 +1283,46 @@ export async function GET(request: NextRequest) {
         ]),
   ].join('\n')
   const responseFormattedContext = shouldUseCompactResponse ? compactFormattedContext : formattedContext
+  const compactRules = applicable_rules.slice(0, 6)
+  const compactChunks = shouldUseCompactResponse ? [] : chunks
+
+  if (toolResponseMode) {
+    return NextResponse.json({
+      context: responseFormattedContext,
+      main_items: relevant_nomenclature.slice(0, 8).map((item) => ({
+        code: item.code,
+        article: item.article,
+        name: item.name,
+        brand: item.brand,
+      })),
+      requested_invoice_items: requested_invoice_items.slice(0, 8).map((item) => ({
+        code: item.code,
+        article: item.article,
+        name: item.name,
+        brand: item.brand,
+      })),
+      accessories: nomenclature_accessories.slice(0, 6).map((item) => ({
+        code: item.code,
+        article: item.article,
+        name: item.name,
+        brand: item.brand,
+      })),
+      questions: selection_guidance.questions.slice(0, 3),
+      rules: compactRules.map((rule) => ({
+        name: rule.rule_name,
+        text: rule.rule_text,
+        prohibition: rule.is_prohibition,
+      })),
+      meta: {
+        compact: shouldUseCompactResponse,
+        products_count: products.length,
+        nomenclature_count: relevant_nomenclature.length,
+        accessories_count: nomenclature_accessories.length,
+        rules_count: compactRules.length,
+        chunks_count: compactChunks.length,
+      },
+    })
+  }
 
   return NextResponse.json({
     query: rawQuery,
@@ -1298,9 +1341,9 @@ export async function GET(request: NextRequest) {
     nomenclature_accessories,
     requested_invoice_items,
     selection_guidance,
-    applicable_rules: shouldUseCompactResponse ? applicable_rules.slice(0, 6) : applicable_rules,
+    applicable_rules: shouldUseCompactResponse ? compactRules : applicable_rules,
     relevant_notes: notes,
-    document_chunks: shouldUseCompactResponse ? [] : chunks,
+    document_chunks: compactChunks,
     formatted_context: responseFormattedContext,
     meta: {
       products_count: products.length,
