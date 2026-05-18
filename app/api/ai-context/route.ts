@@ -448,9 +448,10 @@ export async function GET(request: NextRequest) {
     const seen = new Set<string>()
     const result: NomenclatureItem[] = []
     for (const item of items) {
-      const key = item.code
-        ? `code:${item.code}`
-        : `text:${(item.name || '').replace(/\s+/g, ' ').trim().toLowerCase()}|${item.brand || ''}|${item.article || ''}`
+      const normalizedName = (item.name || '').replace(/\s+/g, ' ').trim().toLowerCase()
+      const key = normalizedName
+        ? `text:${normalizedName}|${item.brand || ''}`
+        : `code:${item.code || ''}|${item.article || ''}`
       if (seen.has(key)) continue
       seen.add(key)
       result.push(item)
@@ -783,10 +784,25 @@ export async function GET(request: NextRequest) {
   const notes     = notesRes.status    === 'fulfilled' ? (notesRes.value.data    ?? []) : []
   const rawChunks = chunksRes.status   === 'fulfilled' ? chunksRes.value          : []
 
-  const chunks = deduplicateChunks(rawChunks, limitChunks)
+  const hasGeotextileQueryForContext = /геотекст|дорнит|геоткан/i.test(rawQuery)
+  const hasXpsQueryForContext = /xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)
+  const hasCylinderQueryForContext = /цилиндр|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+  const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
+    const doc = chunk.documents
+    const mfrRaw = doc?.manufacturers
+    const mfr = (Array.isArray(mfrRaw) ? mfrRaw[0] : mfrRaw)?.name_ru ?? chunk.manufacturer ?? ''
+    const text = `${chunk.content || ''} ${doc?.title || chunk.doc_title || ''} ${mfr}`.toLowerCase()
+
+    if (hasGeotextileQueryForContext) return /геотекст|геоткан|дорнит|геоком|georex|геосинтет/i.test(text)
+    if (hasXpsQueryForContext) return /xps|экструз|пенополистирол|пенопл[еэ]кс|техноплекс|carbon|утеплитель|плит/i.test(text)
+    if (hasCylinderQueryForContext) return /цилиндр|скорлуп|xotpipe|хотпайп|трубопровод/i.test(text)
+    return true
+  }
+
+  const chunks = deduplicateChunks(rawChunks.filter(chunkMatchesQueryTheme), limitChunks)
   const { data: rulesData } = await supabase
     .from('selection_rules')
-    .select('id, rule_name, condition, rule_text, priority, is_prohibition')
+    .select('id, rule_name, condition, rule_text, priority, is_prohibition, category')
     .order('priority', { ascending: true });
 
   const allRules = rulesData ?? [];
@@ -800,10 +816,18 @@ export async function GET(request: NextRequest) {
     );
   });
 
-  // Если релевантных нет — берём все запреты (они всегда важны)
+  const topicProhibitionMatches = (rule: any) => {
+    const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+    if (hasGeotextileQueryForContext) return /геотекст|геоткан|дорнит|геосинтет|геореш|откос|склон|асфальт|площадк|парковк|нагруз/i.test(haystack)
+    if (hasXpsQueryForContext) return /xps|пенополистирол|экструз|техноплекс|carbon|кровл|фасад|нг|пожар/i.test(haystack)
+    if (hasCylinderQueryForContext) return /цилиндр|труб|фольг|оцинк|котельн|шахт|xotpipe|хотпайп/i.test(haystack)
+    return false
+  }
+
+  // Если релевантных нет — берём только тематические запреты, а не всю базу правил.
   const applicable_rules = relevantRules.length > 0
     ? relevantRules
-    : allRules.filter(r => r.is_prohibition);
+    : allRules.filter(r => r.is_prohibition && topicProhibitionMatches(r));
 
   const selection_guidance = {
     clarification_needed: false,
