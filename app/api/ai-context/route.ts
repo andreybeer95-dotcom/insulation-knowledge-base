@@ -291,9 +291,49 @@ export async function GET(request: NextRequest) {
     .map(w => w.toLowerCase().trim())
     .filter(w => w.length > 3 && !STOP_WORDS.includes(w))
 
+  const extractExplicitSizeNumbers = (text: string) => {
+    const matches = Array.from(text.matchAll(/(\d{2,4})\s*[xх*]\s*(\d{1,4})(?:\s*[xх*]\s*(\d{1,4}))?/gi))
+    let best: { numbers: string[]; score: number } | null = null
+
+    for (const match of matches) {
+      const [raw, firstRaw, secondRaw, thirdRaw] = match
+      const index = match.index ?? 0
+      const before = text.slice(Math.max(0, index - 60), index).toLowerCase()
+      const after = text.slice(index + raw.length, index + raw.length + 60).toLowerCase()
+      const context = `${before} ${after}`
+      const first = Number(firstRaw)
+      const second = Number(secondRaw)
+      const third = thirdRaw ? Number(thirdRaw) : null
+
+      if (/o-me|ome|окож|кожух|zn|оцинк|нержав|алюмин/i.test(context)) continue
+
+      let numbers: string[] | null = null
+      if (third !== null && first >= 900 && second <= 1220 && third <= 300) {
+        numbers = [secondRaw, thirdRaw]
+      } else if (third !== null && third >= 900 && first <= 1220 && second <= 300) {
+        numbers = [firstRaw, secondRaw]
+      } else if (third === null && first <= 1220 && second <= 300) {
+        numbers = [firstRaw, secondRaw]
+      }
+      if (!numbers) continue
+
+      let score = 1
+      if (/цилиндр|скорлуп|отвод|xotpipe|хотпайп|sp[-\s]*\d+|dt/i.test(context)) score += 5
+      if (third !== null) score += 2
+      if (numbers[1] === '30' || numbers[1] === '50' || numbers[1] === '70') score += 1
+
+      if (!best || score > best.score) {
+        best = { numbers, score }
+      }
+    }
+
+    return best?.numbers ?? null
+  }
+
   // Extract numbers from rawQuery for product filtering
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
-  const allKeywords = [...meaningfulKeywords, ...queryNumbers]
+  const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
+  const allKeywords = [...meaningfulKeywords, ...requestedSizeNumbers]
 
   const hasExactSizeInText = (text: string, firstSize: string, secondSize: string) => {
     const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
@@ -305,8 +345,8 @@ export async function GET(request: NextRequest) {
   }
 
   const filterProductsByRequestedSize = (items: any[]) => {
-    if (queryNumbers.length < 2) return items
-    const [firstSize, secondSize] = queryNumbers
+    if (requestedSizeNumbers.length < 2) return items
+    const [firstSize, secondSize] = requestedSizeNumbers
     return items.filter((item) => productMatchesRequestedSize(item, firstSize, secondSize))
   }
 
@@ -350,7 +390,7 @@ export async function GET(request: NextRequest) {
     products = filterProductsByRequestedSize(keywordProducts ?? [])
 
     // Fallback только для запросов без конкретного размера, иначе он создаёт ложные рекомендации.
-    if (products.length < 5 && queryNumbers.length < 2) {
+    if (products.length < 5 && requestedSizeNumbers.length < 2) {
       const { data: fallbackProducts } = await supabase
         .from('products')
         .select(`
@@ -496,8 +536,8 @@ export async function GET(request: NextRequest) {
       nomQuery = nomQuery.eq('brand', nomBrand)
     }
 
-    if (queryNumbers.length >= 2) {
-      const [firstSize, secondSize] = queryNumbers
+    if (requestedSizeNumbers.length >= 2) {
+      const [firstSize, secondSize] = requestedSizeNumbers
       const sizeFilters = getSizeFilters(firstSize, secondSize).join(',')
 
       nomQuery = nomQuery.or(sizeFilters)
@@ -533,7 +573,7 @@ export async function GET(request: NextRequest) {
     const isImplicitXotpipeCylinderQuery =
       /xotpipe|хотпайп/i.test(rawQuery) &&
       /\bsp\b/i.test(rawQuery) &&
-      queryNumbers.length >= 2 &&
+      requestedSizeNumbers.length >= 2 &&
       !isAccessoryQuery
     const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery) || isImplicitXotpipeCylinderQuery
     if (isCylinderQuery) {
@@ -652,8 +692,8 @@ export async function GET(request: NextRequest) {
         .slice(0, 20)
     }
 
-    if (queryNumbers.length >= 2) {
-      const [firstSize, secondSize] = queryNumbers
+    if (requestedSizeNumbers.length >= 2) {
+      const [firstSize, secondSize] = requestedSizeNumbers
       const [relatedByNameRes, relatedByArticleRes] = await Promise.all([
         supabase
           .from('nomenclature_1c')
@@ -926,7 +966,13 @@ export async function GET(request: NextRequest) {
     query: rawQuery,
     query_keywords: query,
     filters: { product_id, category_id, intent_tags, doc_types: doc_types_arr },
-    detected: detectContext(query),
+    detected: {
+      ...detectContext(query),
+      requested_size:
+        requestedSizeNumbers.length >= 2
+          ? { diameter_mm: Number(requestedSizeNumbers[0]), thickness_mm: Number(requestedSizeNumbers[1]) }
+          : null,
+    },
     relevant_products: products,
     relevant_nomenclature,
     nomenclature_analogs,
@@ -946,6 +992,7 @@ export async function GET(request: NextRequest) {
       notes_count:    notes.length,
       chunks_count:   chunks.length,
       brand_priority: BRAND_PRIORITY,
+      requested_size_numbers: requestedSizeNumbers,
     },
   })
 }
