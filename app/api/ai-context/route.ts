@@ -1355,10 +1355,6 @@ export async function GET(request: NextRequest) {
   relinkInvoiceLines()
 
   // ─── параллельные запросы ─────────────────────────────────
-  // В compact/tool режиме document_chunks не попадают в ответ, поэтому не тратим время на тяжёлый поиск.
-  // Это критично для n8n/Railway: менеджерский ответ должен собираться быстро по 1С + selection_rules.
-  const skipChunkSearchForCompact = compactMode || toolResponseMode || hasConstructionInsulationQueryForNomenclature || isBareThicknessOnly
-
   const [rulesRes, notesRes, chunksRes] = await Promise.allSettled([
 
     // правила подбора (таблица осталась прежней)
@@ -1374,19 +1370,15 @@ export async function GET(request: NextRequest) {
       .limit(8),
 
     // чанки — пробуем новую RPC сначала, fallback на старую логику
-    // чанки — только для полной выдачи; compact/tool получает правила и 1С без тяжёлого поиска документов
-    skipChunkSearchForCompact
-      ? Promise.resolve([])
-      : searchChunks(supabase, {
-          query: searchQuery,
-          limitChunks,
-          product_id,
-          manufacturer_id: detectedManufacturerId,
-          category_id,
-          intent_tags,
-          doc_types_arr,
-        }),
-
+    searchChunks(supabase, {
+      query: searchQuery,
+      limitChunks,
+      product_id,
+      manufacturer_id: detectedManufacturerId,
+      category_id,
+      intent_tags,
+      doc_types_arr,
+    }),
   ])
 
   const rules     = rulesRes.status    === 'fulfilled' ? (rulesRes.value.data    ?? []) : []
