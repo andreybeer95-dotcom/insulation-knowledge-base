@@ -220,17 +220,6 @@ export async function GET(request: NextRequest) {
     'мбор': 'c2b8ab7c-79a8-40dd-882a-07e1f591de8d',
     'cutwool': '6bc4d830-ca68-4a3e-8dbf-570a220f14ea',
     'isotec': '96cd9ebc-b30c-4544-930e-1f375745fa48',
-    'изотек': '96cd9ebc-b30c-4544-930e-1f375745fa48',
-    'bos': 'e88e884e-879a-4038-a7a7-1e95c695efce',
-    'bos-pipe': 'e88e884e-879a-4038-a7a7-1e95c695efce',
-    'bos pipe': 'e88e884e-879a-4038-a7a7-1e95c695efce',
-    'бос': 'e88e884e-879a-4038-a7a7-1e95c695efce',
-    'baztech': '29fdd985-35b3-4892-8bf7-e2ad732c5eb1',
-    'базтех': '29fdd985-35b3-4892-8bf7-e2ad732c5eb1',
-    'mapei': '625e63bd-0551-4185-8fd9-1815aacf863e',
-    'мапеи': '625e63bd-0551-4185-8fd9-1815aacf863e',
-    'мапей': '625e63bd-0551-4185-8fd9-1815aacf863e',
-    'аквастоп': 'bc3ec395-0c6a-4bd3-b2e3-07689e26ff7d',
   };
 
   /** manufacturer_id → brand как в nomenclature_1c (подмножество manufacturerMap) */
@@ -245,12 +234,6 @@ export async function GET(request: NextRequest) {
     'dee03c0e-aa7f-4b28-a1a5-73dcf3dfd30c': 'КНАУФ',
     '4584f447-4178-4757-901a-00f38614c381': 'ПЕНОПЛЭКС',
     '4bdf5e83-5b51-4e91-8edf-5cef85bd5560': 'HOTROCK',
-    '96cd9ebc-b30c-4544-930e-1f375745fa48': 'ISOTEC',
-    'e88e884e-879a-4038-a7a7-1e95c695efce': 'BOS',
-    '29fdd985-35b3-4892-8bf7-e2ad732c5eb1': 'BAZTECH',
-    '625e63bd-0551-4185-8fd9-1815aacf863e': 'MAPEI',
-    'bc3ec395-0c6a-4bd3-b2e3-07689e26ff7d': 'АКВАСТОП',
-
   }
 
   const nomenclatureBrandKeywordMap: Record<string, string> = {
@@ -278,18 +261,6 @@ export async function GET(request: NextRequest) {
     'хотрок': 'HOTROCK',
     'дорнит': 'ДОРНИТ',
     'армостаб': 'АРМОСТАБ',
-    'isotec': 'ISOTEC',
-    'изотек': 'ISOTEC',
-    'bos': 'BOS',
-    'bos-pipe': 'BOS',
-    'bos pipe': 'BOS',
-    'бос': 'BOS',
-    'baztech': 'BAZTECH',
-    'базтех': 'BAZTECH',
-    'mapei': 'MAPEI',
-    'мапеи': 'MAPEI',
-    'мапей': 'MAPEI',
-
   }
 
   // Приоритет брендов для подбора (когда нет конкретного бренда в запросе)
@@ -390,11 +361,10 @@ export async function GET(request: NextRequest) {
     const value = Number(n)
     return value >= 30 && value <= 300
   })
+
   const hasExactSizeInText = (text: string, firstSize: string, secondSize: string) => {
-    const direct = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
-    const reversed = new RegExp(`(^|\\D)${secondSize}\\s*[xх*\\-]\\s*${firstSize}(\\D|$)`, 'i')
-    const dotted = new RegExp(`(^|\\D)${firstSize}\\.${secondSize}(\\D|$)`, 'i')
-    return direct.test(text) || reversed.test(text) || dotted.test(text)
+    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
+    return pattern.test(text)
   }
 
   const productMatchesRequestedSize = (product: any, firstSize: string, secondSize: string) => {
@@ -744,24 +714,14 @@ export async function GET(request: NextRequest) {
     `name.ilike.% ${firstSize}x${secondSize}%`,
     `name.ilike.% ${firstSize}х${secondSize}%`,
     `name.ilike.% ${firstSize}-${secondSize}%`,
-    `name.ilike.%${firstSize}.${secondSize}%`,
-    `name.ilike.% ${secondSize}x${firstSize}%`,
-    `name.ilike.% ${secondSize}х${firstSize}%`,
-    `name.ilike.% ${secondSize}-${firstSize}%`,
     `name.ilike.%(${firstSize}x${secondSize}%`,
     `name.ilike.%(${firstSize}х${secondSize}%`,
     `name.ilike.%(${firstSize}-${secondSize}%`,
-    `name.ilike.%(${secondSize}x${firstSize}%`,
-    `name.ilike.%(${secondSize}х${firstSize}%`,
-    `name.ilike.%(${secondSize}-${firstSize}%`,
     `article.ilike.%${firstSize}-${secondSize}%`,
     `article.ilike.%${firstSize}x${secondSize}%`,
     `article.ilike.%${firstSize}х${secondSize}%`,
-    `article.ilike.%${firstSize}.${secondSize}%`,
-    `article.ilike.%${secondSize}-${firstSize}%`,
-    `article.ilike.%${secondSize}x${firstSize}%`,
-    `article.ilike.%${secondSize}х${firstSize}%`,
   ]
+
   const hasExactSize = (item: NomenclatureItem, firstSize: string, secondSize: string) => {
     const text = `${item.article || ''} ${item.name || ''}`
     return hasExactSizeInText(text, firstSize, secondSize)
@@ -1936,41 +1896,6 @@ async function searchChunks(
   // ШАГ 0: Прямой поиск по названию документа (высший приоритет)
   // Ищем точное совпадение артикула в названии документа
   const rawWords = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
-
-
-  // Быстрый точный поиск по недавно привязанным сериям.
-  // Он нужен до общей RPC-выдачи: иначе широкие совпадения по "цилиндры" могут вытеснить точный BOS/ISOTEC/BAZTECH-источник.
-  const directSeriesLookup = [
-    { test: /\bbos(?:[-\s]?pipe)?\b|\bбос\b/i, terms: ['BOS-PIPE', 'BOS PIPE'], manufacturerId: 'e88e884e-879a-4038-a7a7-1e95c695efce' },
-    { test: /\bisotec\b|\bизотек\b/i, terms: ['ISOTEC Section', 'ISOTEC'], manufacturerId: '96cd9ebc-b30c-4544-930e-1f375745fa48' },
-    { test: /\bbaztech\b|\bбазтех\b/i, terms: ['BAZTECH ROLL', 'BAZTECH'], manufacturerId: '29fdd985-35b3-4892-8bf7-e2ad732c5eb1' },
-    { test: /\bmapei\b|\bмапеи\b|\bмапей\b/i, terms: ['MAPEI'], manufacturerId: '625e63bd-0551-4185-8fd9-1815aacf863e' },
-    { test: /\bаквастоп\b|\bakvastop\b/i, terms: ['АКВАСТОП', 'AKVASTOP'], manufacturerId: 'bc3ec395-0c6a-4bd3-b2e3-07689e26ff7d' },
-  ].find((item) => item.test.test(query))
-
-  if (directSeriesLookup) {
-    const directFilters = directSeriesLookup.terms.map((term) => `content.ilike.%${term}%`).join(',')
-    let directQuery = supabase
-      .from('document_chunks')
-      .select(`
-        id, content, chunk_index, document_id,
-        doc_type, priority_weight, intent_tags, metadata,
-        documents!inner(id, title, manufacturer_id, manufacturers(name_ru))
-      `)
-      .or(directFilters)
-      .limit(limitChunks * 2)
-
-    const targetManufacturerId = manufacturer_id || directSeriesLookup.manufacturerId
-    if (targetManufacturerId) {
-      directQuery = directQuery.eq('documents.manufacturer_id', targetManufacturerId)
-    }
-
-    const { data: directChunks } = await directQuery
-    if (directChunks && directChunks.length > 0) {
-      console.log(`✅ Direct series lookup returned ${directChunks.length} chunks`)
-      return (directChunks as Record<string, unknown>[]).map(normalizeChunk)
-    }
-  }
 
   // Строим фразы для поиска по title
   const titleSearchPhrases: string[] = [];
