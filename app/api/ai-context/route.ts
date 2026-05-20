@@ -567,6 +567,8 @@ export async function GET(request: NextRequest) {
       if (/ecoplast/i.test(text)) value -= 25
       if (/ecobase|logicbase/i.test(text)) value += 20
       if (/v-sl|v-st|v-uv/i.test(text)) value += 15
+      if (/1\s*[,\.]\s*5\s*(?:мм|mm)?/i.test(text)) value -= 8
+      if (/1\s*[,\.]\s*2\s*(?:мм|mm)?/i.test(text)) value += 4
       if (/пвх|pvc|мембран/i.test(text)) value -= 5
       return value
     }
@@ -1253,7 +1255,7 @@ export async function GET(request: NextRequest) {
     } else {
       const preferredPvcItems = explicitPvcItems.length > 0
         ? [...explicitPvcItems, ...otherPvcItems]
-        : [...plastfoilItems, ...nonPlastfoilItems]
+        : [...nonPlastfoilItems, ...plastfoilItems]
       relevant_nomenclature = dedupeNomenclature([
         ...preferredPvcItems,
         ...relevant_nomenclature,
