@@ -1487,6 +1487,7 @@ export async function GET(request: NextRequest) {
   const hasVentFacadeQueryForContext = hasVentFacadeQueryForNomenclature
   const hasRoofWoolQueryForContext = hasRoofWoolQueryForNomenclature
   const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
+  const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
@@ -1525,6 +1526,9 @@ export async function GET(request: NextRequest) {
     }
     if (hasConstructionInsulationQueryForContext) {
       return ['общестрой', 'теплоизоляция', ''].includes(category)
+    }
+    if (hasPvcMembraneQueryForContext) {
+      return ['кровельные мембраны', 'гидроизоляция', ''].includes(category)
     }
     if (hasGeotextileQueryForContext) {
       return ['геосинтетика', ''].includes(category)
