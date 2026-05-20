@@ -363,7 +363,7 @@ export async function GET(request: NextRequest) {
   })
 
   const hasExactSizeInText = (text: string, firstSize: string, secondSize: string) => {
-    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*[xх*\\-]\\s*${secondSize}(\\D|$)`, 'i')
+    const pattern = new RegExp(`(^|\\D)${firstSize}\\s*(?:[xх*\\-.]|на)\\s*${secondSize}(\\D|$)`, 'i')
     return pattern.test(text)
   }
 
@@ -483,6 +483,7 @@ export async function GET(request: NextRequest) {
   let requested_invoice_items: NomenclatureItem[] = []
   let requested_invoice_lines: RequestedInvoiceLine[] = []
   let missing_invoice_items: RequestedInvoiceLine[] = []
+  let brand_summary: { brand: string; count: number; examples: NomenclatureItem[] }[] = []
 
   const getNomenclatureItemType = (name?: string | null) => {
     const lower = (name || '').toLowerCase()
@@ -542,6 +543,14 @@ export async function GET(request: NextRequest) {
     }
     return result
   }
+
+  const sortNomenclatureItems = (items: NomenclatureItem[]) =>
+    [...items].sort((a, b) => {
+      const aRevenue = a.revenue_3y ?? 0
+      const bRevenue = b.revenue_3y ?? 0
+      if (aRevenue !== bRevenue) return bRevenue - aRevenue
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
 
   const isNomenclatureAccessory = (name?: string | null) =>
     ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
@@ -713,13 +722,17 @@ export async function GET(request: NextRequest) {
   const getSizeFilters = (firstSize: string, secondSize: string) => [
     `name.ilike.% ${firstSize}x${secondSize}%`,
     `name.ilike.% ${firstSize}х${secondSize}%`,
+    `name.ilike.% ${firstSize}.${secondSize}%`,
     `name.ilike.% ${firstSize}-${secondSize}%`,
     `name.ilike.%(${firstSize}x${secondSize}%`,
     `name.ilike.%(${firstSize}х${secondSize}%`,
+    `name.ilike.%(${firstSize}.${secondSize}%`,
     `name.ilike.%(${firstSize}-${secondSize}%`,
+    `name.ilike.%*${firstSize}*${secondSize}%`,
     `article.ilike.%${firstSize}-${secondSize}%`,
     `article.ilike.%${firstSize}x${secondSize}%`,
     `article.ilike.%${firstSize}х${secondSize}%`,
+    `article.ilike.%${firstSize}.${secondSize}%`,
   ]
 
   const hasExactSize = (item: NomenclatureItem, firstSize: string, secondSize: string) => {
@@ -1095,6 +1108,60 @@ export async function GET(request: NextRequest) {
           .filter((item) => !relevantIds.has(item.id))
           .filter((item) => getNomenclatureItemType(item.name) === 'cylinder'))
           .slice(0, 20)
+
+        const preferredBrandOrder = ['XOTPIPE', 'ЭКОРОЛЛ', 'BOS', 'BAZTECH', 'CUTWOOL', 'ROCKWOOL', 'ISOTEC']
+        const brandSizeFilters = getSizeFilters(firstSize, secondSize).join(',')
+        const brandSearchResults = await Promise.all(
+          preferredBrandOrder.map((brand) =>
+            supabase
+              .from('nomenclature_1c')
+              .select('id, code, article, name, brand')
+              .eq('brand', brand)
+              .or(brandSizeFilters)
+              .limit(50)
+          )
+        )
+        const brandSpecificNomenclature = brandSearchResults
+          .flatMap((result) => (result.data ?? []) as NomenclatureItem[])
+          .filter((item) => hasExactSize(item, firstSize, secondSize))
+
+        const brandCandidatesById = new Map<string, NomenclatureItem>()
+        for (const item of [...relevant_nomenclature, ...relatedNomenclature, ...brandSpecificNomenclature]) {
+          if (getNomenclatureItemType(item.name) === 'cylinder' && hasExactSize(item, firstSize, secondSize)) {
+            brandCandidatesById.set(item.id, item)
+          }
+        }
+
+        const brandGroups = new Map<string, NomenclatureItem[]>()
+        for (const item of brandCandidatesById.values()) {
+          const brand = (item.brand || 'UNKNOWN').trim() || 'UNKNOWN'
+          const items = brandGroups.get(brand) ?? []
+          items.push(item)
+          brandGroups.set(brand, items)
+        }
+
+        brand_summary = Array.from(brandGroups.entries())
+          .map(([brand, items]) => ({
+            brand,
+            count: items.length,
+            examples: sortNomenclatureItems(dedupeNomenclature(items)).slice(0, 3),
+          }))
+          .sort((a, b) => {
+            const aRank = preferredBrandOrder.indexOf(a.brand)
+            const bRank = preferredBrandOrder.indexOf(b.brand)
+            const normalizedARank = aRank === -1 ? 99 : aRank
+            const normalizedBRank = bRank === -1 ? 99 : bRank
+            if (normalizedARank !== normalizedBRank) return normalizedARank - normalizedBRank
+            if (a.count !== b.count) return b.count - a.count
+            return a.brand.localeCompare(b.brand, 'ru')
+          })
+
+        const mainIds = new Set(relevant_nomenclature.map((item) => item.id))
+        const summaryExamples = brand_summary.flatMap((group) => group.examples)
+        nomenclature_analogs = dedupeNomenclature([
+          ...nomenclature_analogs,
+          ...summaryExamples.filter((item) => !mainIds.has(item.id)),
+        ]).slice(0, 20)
       }
     }
 
@@ -1649,11 +1716,30 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Правила подбора\n' + rulesText;
   }
 
+  const sortCylinderItemsForManager = (items: NomenclatureItem[]) => {
+    const preferredBrandOrder = ['XOTPIPE', 'ЭКОРОЛЛ', 'BOS', 'BAZTECH', 'CUTWOOL', 'ROCKWOOL', 'ISOTEC']
+    return [...items].sort((a, b) => {
+      const aRank = preferredBrandOrder.indexOf(a.brand || '')
+      const bRank = preferredBrandOrder.indexOf(b.brand || '')
+      const normalizedARank = aRank === -1 ? 99 : aRank
+      const normalizedBRank = bRank === -1 ? 99 : bRank
+      if (normalizedARank !== normalizedBRank) return normalizedARank - normalizedBRank
+      const aRevenue = a.revenue_3y ?? 0
+      const bRevenue = b.revenue_3y ?? 0
+      if (aRevenue !== bRevenue) return bRevenue - aRevenue
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
+  }
+
+  const managerRelevantNomenclature = hasCylinderQueryForContext
+    ? sortCylinderItemsForManager(relevant_nomenclature)
+    : relevant_nomenclature
+
   const shortInvoiceItems = strictInvoiceMode
     ? requested_invoice_items
     : requested_invoice_items.length > 0
     ? requested_invoice_items
-    : relevant_nomenclature
+    : managerRelevantNomenclature
   const foundInvoiceLines = requested_invoice_lines.filter((line) => line.found_item)
   const invoiceStatusLines = strictInvoiceMode
     ? [
@@ -1679,6 +1765,20 @@ export async function GET(request: NextRequest) {
     '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
     ...invoiceStatusLines,
+    ...(brand_summary.length > 0
+      ? [
+          '',
+          '## Сводка брендов по точному размеру',
+          ...brand_summary.map((group) => {
+            const examples = group.examples
+              .slice(0, 2)
+              .map((item) => `${item.name ?? '—'} (${item.code ? `код 1С: ${item.code}` : 'код 1С: —'})`)
+              .join('; ')
+            return `- ${group.brand}: ${group.count} поз. в номенклатуре 1С${examples ? ` | примеры: ${examples}` : ''}`
+          }),
+          '- Если менеджер спрашивает бренды, перечисляй бренды из этой сводки. Не писать "в наличии", только "найдено в номенклатуре 1С".',
+        ]
+      : []),
     '',
     '## Основные позиции 1С',
     ...(shortInvoiceItems.length > 0
@@ -1741,7 +1841,7 @@ export async function GET(request: NextRequest) {
   const responseFormattedContext = shouldUseCompactResponse ? compactFormattedContext : formattedContext
   const compactRules = applicable_rules.slice(0, 6)
   const compactChunks = shouldUseCompactResponse ? [] : chunks
-  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
+  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : managerRelevantNomenclature
   const accessoriesForTool = strictInvoiceMode ? [] : nomenclature_accessories
 
   if (toolResponseMode) {
@@ -1807,6 +1907,18 @@ export async function GET(request: NextRequest) {
         revenue_3y: item.revenue_3y,
         qty_3y: item.qty_3y,
       })),
+      brand_summary: brand_summary.map((group) => ({
+        brand: group.brand,
+        count: group.count,
+        examples: group.examples.map((item) => ({
+          code: item.code,
+          article: item.article,
+          name: item.name,
+          brand: item.brand,
+          category_type: item.product_category_type,
+          parent_code: item.code_1c_parent,
+        })),
+      })),
       questions: selection_guidance.questions.slice(0, 3),
       rules: compactRules.map((rule) => ({
         name: rule.rule_name,
@@ -1818,6 +1930,7 @@ export async function GET(request: NextRequest) {
         products_count: products.length,
         nomenclature_count: relevant_nomenclature.length,
         accessories_count: nomenclature_accessories.length,
+        brand_summary_count: brand_summary.length,
         strict_invoice: strictInvoiceMode,
         invoice_lines_count: requested_invoice_lines.length,
         missing_items_count: missing_invoice_items.length,
