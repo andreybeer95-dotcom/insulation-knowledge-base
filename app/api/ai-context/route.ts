@@ -1856,7 +1856,28 @@ export async function GET(request: NextRequest) {
         ]),
   ].join('\n')
   const responseFormattedContext = shouldUseCompactResponse ? compactFormattedContext : formattedContext
-  const compactRules = applicable_rules.slice(0, 6)
+  const strictCodeRule = {
+    rule_name: 'Глобально — коды 1С только из JSON-контекста',
+    rule_text: [
+      'Запрещено придумывать коды 1С.',
+      'Код 1С можно писать только если он явно пришел из JSON-полей инструмента: main_items, requested_invoice_items, invoice_lines.item, accessories или analogs.',
+      'Если нужного кода нет в этих полях, писать: "точный код 1С не найден в контексте, нужно проверить номенклатуру".',
+      'Не брать коды из памяти модели, старых переписок, примеров, описаний или предположений.',
+    ].join(' '),
+    is_prohibition: true,
+  }
+  const dbStrictCodeRule = applicable_rules.find((rule) =>
+    /коды?\s+1[сc]\s+только|код\s+1[сc]\s+только|json-контекст|json контекст/i.test(
+      `${rule.rule_name || ''} ${rule.rule_text || ''}`
+    )
+  )
+  const strictRuleForTool = dbStrictCodeRule ?? strictCodeRule
+  const compactRules = [
+    strictRuleForTool,
+    ...applicable_rules
+      .filter((rule) => rule.id !== dbStrictCodeRule?.id && rule.rule_name !== strictRuleForTool.rule_name)
+      .slice(0, 5),
+  ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
   const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
   const accessoriesForTool = strictInvoiceMode ? [] : nomenclature_accessories
