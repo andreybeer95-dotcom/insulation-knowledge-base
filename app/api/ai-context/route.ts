@@ -354,6 +354,14 @@ export async function GET(request: NextRequest) {
       hasRoofWoolQueryForNomenclature ||
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
+  const hasPvcMembraneQueryForNomenclature =
+    /пвх|pvc|мембран|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase/i.test(rawQuery) &&
+    !hasCylinderQueryForNomenclature
+  const pvcMembraneThicknesses = Array.from(
+    rawQuery.matchAll(/(\d\s*[,\.]\s*\d|\d{1,2})\s*(?:мм|mm)?/gi)
+  )
+    .map((match) => match[1].replace(/\s+/g, '').replace('.', ','))
+    .filter((value) => /^(?:1,2|1,5|1,8|2,0|2)$/.test(value))
   const isBareThicknessOnly =
     queryNumbers.length === 1 &&
     /^(?:\s*(?:толщина|толщиной|утеплитель|мм|mm)\s*)*\d{2,3}\s*(?:мм|mm)?\s*$/i.test(rawQuery)
@@ -526,6 +534,47 @@ export async function GET(request: NextRequest) {
       new RegExp(`(^|\\D)\\d+\\s*\\/\\s*${thickness}\\s*[xх*]\\s*\\d{3,4}`, 'i'),
     ]
     return patterns.some((pattern) => pattern.test(text))
+  }
+
+  const isPvcMembraneNomenclature = (name?: string | null) =>
+    /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase/i.test(name || '') &&
+    /мембран|plastfoil|пластфойл|logicroof|ecoplast|ecobase|logicbase/i.test(name || '') &&
+    !/клей|мастик|праймер|лента|угол|аэратор|усиление|воронк|дорожк|саморез|крепеж|очистител|герметик/i.test(name || '')
+
+  const hasMembraneThickness = (name: string | null | undefined, thickness: string) => {
+    const text = name || ''
+    const normalized = thickness.replace('.', ',')
+    const dot = normalized.replace(',', '\\.')
+    const comma = normalized.replace(',', ',')
+    const compact = normalized.replace(',', '[,.]')
+    return [
+      new RegExp(`(^|\\D)${compact}\\s*(?:мм|mm|[xх*])`, 'i'),
+      new RegExp(`[xх*]\\s*${compact}(\\D|$)`, 'i'),
+      new RegExp(`\\(${compact}\\s*[xх*]`, 'i'),
+      new RegExp(`(^|\\D)${comma}\\s*(?:мм|mm|[xх*])`, 'i'),
+      new RegExp(`(^|\\D)${dot}\\s*(?:мм|mm|[xх*])`, 'i'),
+    ].some((pattern) => pattern.test(text))
+  }
+
+  const sortPvcMembranes = (items: NomenclatureItem[]) => {
+    const score = (item: NomenclatureItem) => {
+      const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+      let value = 100
+      if (/logicroof\s+v-rp/i.test(text)) value -= 50
+      if (/ecoplast\s+v-rp/i.test(text)) value -= 45
+      if (/пластфойл|plastfoil/i.test(text)) value -= 35
+      if (/logicroof/i.test(text)) value -= 30
+      if (/ecoplast/i.test(text)) value -= 25
+      if (/ecobase|logicbase/i.test(text)) value += 20
+      if (/v-sl|v-st|v-uv/i.test(text)) value += 15
+      if (/пвх|pvc|мембран/i.test(text)) value -= 5
+      return value
+    }
+    return [...items].sort((a, b) => {
+      const scoreDiff = score(a) - score(b)
+      if (scoreDiff !== 0) return scoreDiff
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
   }
 
   const dedupeNomenclature = (items: NomenclatureItem[]) => {
@@ -1125,6 +1174,74 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (hasPvcMembraneQueryForNomenclature && !isBareThicknessOnly) {
+    const pvcQueries = await Promise.all([
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%ПЛАСТФОЙЛ%,name.ilike.%Plastfoil%')
+        .limit(120),
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%LOGICROOF%,name.ilike.%Logicroof%')
+        .limit(120),
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%Ecoplast%,name.ilike.%Ecobase%,name.ilike.%Logicbase%')
+        .limit(120),
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%ПВХ%,name.ilike.%PVC%')
+        .limit(120),
+    ])
+
+    let pvcCandidates = dedupeNomenclature(
+      pvcQueries.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
+    ).filter((item) => isPvcMembraneNomenclature(item.name))
+
+    const requestedPvcThicknesses = pvcMembraneThicknesses.length > 0
+      ? pvcMembraneThicknesses
+      : /1\s*[,\.]\s*5/i.test(rawQuery)
+        ? ['1,5']
+        : []
+
+    if (requestedPvcThicknesses.length > 0) {
+      pvcCandidates = pvcCandidates.filter((item) =>
+        requestedPvcThicknesses.some((thickness) => hasMembraneThickness(item.name, thickness))
+      )
+    }
+
+    const isPlastfoilItem = (item: NomenclatureItem) =>
+      /пластфойл|plastfoil/i.test(`${item.brand || ''} ${item.name || ''}`)
+
+    const wantsAnalogForPlastfoil =
+      /пластфойл|plastfoil/i.test(rawQuery) &&
+      /аналог|замен|вместо|альтернатив|analog|replacement|alternative/i.test(rawQuery)
+
+    const plastfoilItems = sortPvcMembranes(pvcCandidates.filter(isPlastfoilItem))
+    const nonPlastfoilItems = sortPvcMembranes(pvcCandidates.filter((item) => !isPlastfoilItem(item)))
+
+    if (wantsAnalogForPlastfoil) {
+      relevant_nomenclature = dedupeNomenclature([
+        ...nonPlastfoilItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 12)
+      nomenclature_analogs = dedupeNomenclature([
+        ...plastfoilItems,
+        ...nomenclature_analogs,
+      ]).slice(0, 12)
+    } else {
+      relevant_nomenclature = dedupeNomenclature([
+        ...plastfoilItems,
+        ...nonPlastfoilItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 12)
+    }
+  }
+
   if (hasRoofWoolQueryForNomenclature) {
     const lowerThicknesses = Array.from(rawQuery.matchAll(/(?:техноруф\s+н|(?:^|\s)н)(?:\s+проф|\s+оптим[ао]|\s+экстра)?\D{0,24}(\d{2,3})/gi))
       .map((match) => match[1])
@@ -1291,7 +1408,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
-  if (relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature)) {
+  if (relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature)) {
     products = []
   }
   if (isBareThicknessOnly) {
