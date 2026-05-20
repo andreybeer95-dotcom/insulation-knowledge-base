@@ -1223,6 +1223,23 @@ export async function GET(request: NextRequest) {
 
     const plastfoilItems = sortPvcMembranes(pvcCandidates.filter(isPlastfoilItem))
     const nonPlastfoilItems = sortPvcMembranes(pvcCandidates.filter((item) => !isPlastfoilItem(item)))
+    const explicitPvcSeriesMatcher = /ecoplast/i.test(rawQuery)
+      ? /ecoplast/i
+      : /logicroof/i.test(rawQuery)
+        ? /logicroof/i
+        : /plastfoil|пластфойл/i.test(rawQuery) && !wantsAnalogForPlastfoil
+          ? /plastfoil|пластфойл/i
+          : null
+    const explicitPvcItems = explicitPvcSeriesMatcher
+      ? sortPvcMembranes(pvcCandidates.filter((item) =>
+          explicitPvcSeriesMatcher.test(`${item.brand || ''} ${item.name || ''}`)
+        ))
+      : []
+    const otherPvcItems = explicitPvcSeriesMatcher
+      ? sortPvcMembranes(pvcCandidates.filter((item) =>
+          !explicitPvcSeriesMatcher.test(`${item.brand || ''} ${item.name || ''}`)
+        ))
+      : []
 
     if (wantsAnalogForPlastfoil) {
       relevant_nomenclature = dedupeNomenclature([
@@ -1234,9 +1251,11 @@ export async function GET(request: NextRequest) {
         ...nomenclature_analogs,
       ]).slice(0, 12)
     } else {
+      const preferredPvcItems = explicitPvcItems.length > 0
+        ? [...explicitPvcItems, ...otherPvcItems]
+        : [...plastfoilItems, ...nonPlastfoilItems]
       relevant_nomenclature = dedupeNomenclature([
-        ...plastfoilItems,
-        ...nonPlastfoilItems,
+        ...preferredPvcItems,
         ...relevant_nomenclature,
       ]).slice(0, 12)
     }
