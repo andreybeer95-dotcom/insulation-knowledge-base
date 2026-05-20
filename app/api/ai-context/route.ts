@@ -1259,6 +1259,43 @@ export async function GET(request: NextRequest) {
         ...relevant_nomenclature,
       ]).slice(0, 12)
     }
+
+    const needsPvcRoofAccessoryContext =
+      /кровл|крыша|roof|доп|сопутств|комплект|аксессуар|400|расчет|рассчитать|креп[её]ж|клей|стеклохолст|геотекст|воронк|планк|termoclip|bond/i.test(rawQuery)
+
+    if (needsPvcRoofAccessoryContext) {
+      const preferredAccessoryCodes = [
+        'ЦВ000225423', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (400 м2)
+        'ЦВ000218357', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (100 м2)
+        'ЦВ000209969', // LOGICROOF BOND 10 л
+        'ЦВ000219591', // LOGICROOF BOND 5 л
+        'ЦВ000012139', // Termoclip-кровля R 28/110
+        'ЦВ000218747', // Termoclip-кровля R 28/70
+        'ЦВ000246721', // ПВХ Металл 1x2м
+        'ЦБ48182',     // ПВХ металл серый 1x2м
+        'ЦВ000228797', // LOGICROOF MAST-PU
+        'ЦВ000228799', // LOGICROOF MAST-PRIME
+        'ЦВ000228798', // LOGICROOF MAST-AKS
+        'ЦБ51290',     // LOGICROOF NG
+        'ЦВ000229344', // LOGICROOF NG
+        'ЦВ000206375', // LOGICROOF SelfPatch
+      ]
+
+      const { data: pvcAccessoryByCode } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .in('code', preferredAccessoryCodes)
+        .limit(80)
+
+      const orderByCode = new Map(preferredAccessoryCodes.map((code, index) => [code, index]))
+      const pvcAccessoryItems = ((pvcAccessoryByCode ?? []) as NomenclatureItem[])
+        .sort((a, b) => (orderByCode.get(a.code || '') ?? 999) - (orderByCode.get(b.code || '') ?? 999))
+
+      nomenclature_accessories = dedupeNomenclature([
+        ...pvcAccessoryItems,
+        ...nomenclature_accessories,
+      ]).slice(0, 24)
+    }
   }
 
   if (hasRoofWoolQueryForNomenclature) {
