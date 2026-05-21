@@ -1589,6 +1589,26 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*мастер(?!\s*(соло|pir|пир|с|re30))|кровл[яья].*мастер(?!\s*(соло|pir|пир|с|re30))|tn[-\s]*roof.*master(?!\s*(solo|pir|re30))/i,
     },
     {
+      id: 'tn_roof_standart',
+      name: 'ТН-КРОВЛЯ Стандарт',
+      pattern: /тн[-\s]*кровл[яья]\s*стандарт|кровл[яья].*стандарт|tn[-\s]*roof.*standart|tn[-\s]*roof.*standard/i,
+    },
+    {
+      id: 'tn_roof_ballast',
+      name: 'ТН-КРОВЛЯ Балласт',
+      pattern: /тн[-\s]*кровл[яья]\s*балласт(?!\s*(pir|пир))|кровл[яья].*балласт(?!\s*(pir|пир))|tn[-\s]*roof.*ballast(?!\s*pir)/i,
+    },
+    {
+      id: 'tn_roof_invers',
+      name: 'ТН-КРОВЛЯ Инверс',
+      pattern: /тн[-\s]*кровл[яья]\s*инверс|кровл[яья].*инверс|инверсионн.*кровл|tn[-\s]*roof.*invers|inversion/i,
+    },
+    {
+      id: 'tn_roof_optima',
+      name: 'ТН-КРОВЛЯ Оптима',
+      pattern: /тн[-\s]*кровл[яья]\s*оптима|кровл[яья].*оптима|tn[-\s]*roof.*optima/i,
+    },
+    {
       id: 'tn_roof_smart_pir',
       name: 'ТН-КРОВЛЯ Смарт PIR',
       pattern: /тн[-\s]*кровл[яья]\s*смарт\s*pir|смарт\s*pir|smart\s*pir|logicpir\s+prof|логикпир\s+prof|пир.*профлист.*пвх/i,
