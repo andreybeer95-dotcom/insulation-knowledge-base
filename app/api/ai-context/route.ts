@@ -1634,6 +1634,36 @@ export async function GET(request: NextRequest) {
   const detectedSystemIdsForContext = [...new Set(systemContextsForQuery.map(system => system.id))]
   const hasSystemQueryForContext = detectedSystemIdsForContext.length > 0
   const hasRoofSmartSystemQueryForContext = detectedSystemIdsForContext.includes('tn_roof_smart')
+  const isRuleForDetectedSystem = (rule: any) => {
+    const ruleName = String(rule.rule_name || '').toLowerCase()
+    const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+    return systemContextsForQuery.some(system => {
+      const id = system.id.toLowerCase()
+      const name = system.name.toLowerCase()
+      return (
+        haystack.includes(id) ||
+        ruleName.startsWith(`система ${name} —`) ||
+        ruleName === `система ${name}` ||
+        haystack.includes(`system_card ${id}`) ||
+        haystack.includes(`system_layer ${id}`)
+      )
+    })
+  }
+  const detectedSystemIndexForRule = (rule: any) => {
+    const ruleName = String(rule.rule_name || '').toLowerCase()
+    const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+    return systemContextsForQuery.findIndex(system => {
+      const id = system.id.toLowerCase()
+      const name = system.name.toLowerCase()
+      return (
+        haystack.includes(id) ||
+        ruleName.startsWith(`система ${name} —`) ||
+        ruleName === `система ${name}` ||
+        haystack.includes(`system_card ${id}`) ||
+        haystack.includes(`system_layer ${id}`)
+      )
+    })
+  }
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
@@ -1697,10 +1727,7 @@ export async function GET(request: NextRequest) {
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
 
     if (hasSystemQueryForContext) {
-      const isDetectedSystemRule = systemContextsForQuery.some(system =>
-        haystack.includes(system.id.toLowerCase()) ||
-        haystack.includes(system.name.toLowerCase())
-      )
+      const isDetectedSystemRule = isRuleForDetectedSystem(rule)
       if (isDetectedSystemRule) return true
       if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
         return false
@@ -1745,10 +1772,7 @@ export async function GET(request: NextRequest) {
         const score = (rule: any) => {
           const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
           let value = Number(rule.priority ?? 99) * 10
-          const systemIndex = systemContextsForQuery.findIndex(system =>
-            haystack.includes(system.id.toLowerCase()) ||
-            haystack.includes(system.name.toLowerCase())
-          )
+          const systemIndex = detectedSystemIndexForRule(rule)
           if (systemIndex >= 0) value -= 100 - systemIndex
           if (/система/i.test(haystack)) value -= 10
           if (/расх|расч[её]т|состав|роли|аналог|огранич/i.test(haystack)) value -= 5
@@ -2010,6 +2034,8 @@ export async function GET(request: NextRequest) {
 
   const shortInvoiceItems = strictInvoiceMode
     ? requested_invoice_items
+    : hasSystemQueryForContext
+    ? []
     : requested_invoice_items.length > 0
     ? requested_invoice_items
     : relevant_nomenclature
@@ -2034,6 +2060,7 @@ export async function GET(request: NextRequest) {
       ]
     : []
   const shouldUseCompactResponse = compactMode || hasConstructionInsulationQueryForContext || isBareThicknessOnly
+    || hasSystemQueryForContext
   const compactFormattedContext = [
     '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
@@ -2064,6 +2091,8 @@ export async function GET(request: NextRequest) {
     '## Сопутствующие',
     ...(strictInvoiceMode
       ? ['- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
+      : hasSystemQueryForContext
+      ? ['- Сопутствующие брать из состава выбранной системы в rules; не добавлять общее из поиска.']
       : nomenclature_accessories.length > 0
       ? nomenclature_accessories.slice(0, 6).map((n) => {
           const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: проверить'
@@ -2121,8 +2150,8 @@ export async function GET(request: NextRequest) {
       .slice(0, hasSystemQueryForContext ? 8 : 5),
   ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
-  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
-  const accessoriesForTool = strictInvoiceMode ? [] : nomenclature_accessories
+  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : hasSystemQueryForContext ? [] : relevant_nomenclature
+  const accessoriesForTool = strictInvoiceMode || hasSystemQueryForContext ? [] : nomenclature_accessories
 
   if (toolResponseMode) {
     return NextResponse.json({
