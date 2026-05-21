@@ -1529,6 +1529,66 @@ export async function GET(request: NextRequest) {
   const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
   const systemContextsForQuery = [
     {
+      id: 'tn_roof_klassik_prof',
+      name: 'ТН-КРОВЛЯ Классик Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*классик\s*проф|классик\s*проф|klassik\s*prof/i,
+    },
+    {
+      id: 'tn_roof_klassik',
+      name: 'ТН-КРОВЛЯ Классик',
+      pattern: /тн[-\s]*кровл[яья]\s*классик(?!\s*проф)|кровл[яья].*классик(?!\s*проф)|klassik(?!\s*prof)/i,
+    },
+    {
+      id: 'tn_roof_kombi',
+      name: 'ТН-КРОВЛЯ Комби',
+      pattern: /тн[-\s]*кровл[яья]\s*комби|кровл[яья].*комби|tn[-\s]*roof.*kombi/i,
+    },
+    {
+      id: 'tn_roof_master_solo',
+      name: 'ТН-КРОВЛЯ Мастер Соло',
+      pattern: /тн[-\s]*кровл[яья]\s*мастер\s*соло|мастер\s*соло|master\s*solo/i,
+    },
+    {
+      id: 'tn_roof_solo',
+      name: 'ТН-КРОВЛЯ Соло',
+      pattern: /тн[-\s]*кровл[яья]\s*соло(?!\s*(пир|pir|лайт|проф))|кровл[яья].*соло(?!\s*(пир|pir|лайт|проф))|tn[-\s]*roof.*solo(?!\s*(pir|light|prof))/i,
+    },
+    {
+      id: 'tn_roof_titan',
+      name: 'ТН-КРОВЛЯ Титан',
+      pattern: /тн[-\s]*кровл[яья]\s*титан|кровл[яья].*титан|tn[-\s]*roof.*titan/i,
+    },
+    {
+      id: 'tn_roof_fiks_prof',
+      name: 'ТН-КРОВЛЯ Фикс Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*фикс\s*проф|фикс\s*проф|fix\s*prof|fiks\s*prof/i,
+    },
+    {
+      id: 'tn_roof_fiks',
+      name: 'ТН-КРОВЛЯ Фикс',
+      pattern: /тн[-\s]*кровл[яья]\s*фикс(?!\s*(проф|pir|пир))|кровл[яья].*фикс(?!\s*(проф|pir|пир))|tn[-\s]*roof.*(?:fix|fiks)(?!\s*(prof|pir))/i,
+    },
+    {
+      id: 'tn_roof_express_klassik_prof',
+      name: 'ТН-КРОВЛЯ Экспресс Классик Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*экспресс\s*классик\s*проф|экспресс\s*классик\s*проф|express\s*klassik\s*prof/i,
+    },
+    {
+      id: 'tn_roof_express_klassik',
+      name: 'ТН-КРОВЛЯ Экспресс Классик',
+      pattern: /тн[-\s]*кровл[яья]\s*экспресс\s*классик(?!\s*проф)|экспресс\s*классик(?!\s*проф)|express\s*klassik(?!\s*prof)/i,
+    },
+    {
+      id: 'tn_roof_garant_plus',
+      name: 'ТН-КРОВЛЯ Гарант Плюс',
+      pattern: /тн[-\s]*кровл[яья]\s*гарант\s*плюс|гарант\s*плюс|garant\s*plus/i,
+    },
+    {
+      id: 'tn_roof_master',
+      name: 'ТН-КРОВЛЯ Мастер',
+      pattern: /тн[-\s]*кровл[яья]\s*мастер(?!\s*(соло|pir|пир|с|re30))|кровл[яья].*мастер(?!\s*(соло|pir|пир|с|re30))|tn[-\s]*roof.*master(?!\s*(solo|pir|re30))/i,
+    },
+    {
       id: 'tn_roof_smart_pir',
       name: 'ТН-КРОВЛЯ Смарт PIR',
       pattern: /тн[-\s]*кровл[яья]\s*смарт\s*pir|смарт\s*pir|smart\s*pir|logicpir\s+prof|логикпир\s+prof|пир.*профлист.*пвх/i,
