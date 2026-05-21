@@ -1589,6 +1589,31 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*мастер(?!\s*(соло|pir|пир|с|re30))|кровл[яья].*мастер(?!\s*(соло|pir|пир|с|re30))|tn[-\s]*roof.*master(?!\s*(solo|pir|re30))/i,
     },
     {
+      id: 'tn_roof_standart_kms',
+      name: 'ТН-КРОВЛЯ Стандарт КМС',
+      pattern: /тн[-\s]*кровл[яья]\s*стандарт\s*кмс|стандарт\s*кмс|standart\s*kms|standard\s*kms|carbon\s+eco.*стяжк|xps.*carbon\s+eco.*стандарт/i,
+    },
+    {
+      id: 'tn_roof_standart_kv',
+      name: 'ТН-КРОВЛЯ Стандарт КВ',
+      pattern: /тн[-\s]*кровл[яья]\s*стандарт\s*кв|стандарт\s*кв|standart\s*kv|standard\s*kv|техноруф\s+н\s+проф.*стяжк|минват.*стандарт.*кровл/i,
+    },
+    {
+      id: 'tn_roof_standart_trotuar',
+      name: 'ТН-КРОВЛЯ Стандарт Тротуар',
+      pattern: /тн[-\s]*кровл[яья]\s*стандарт\s*тротуар|стандарт\s*тротуар|эксплуатируем.*тротуар|тротуарн.*плитк.*кровл|standart\s*trotuar|standard\s*trotuar|roof.*paving/i,
+    },
+    {
+      id: 'tn_roof_grin_pir',
+      name: 'ТН-КРОВЛЯ Грин PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*грин\s*(pir|пир)|грин\s*(pir|пир)|green\s*pir|озелен.*logicpir|озелен.*пир/i,
+    },
+    {
+      id: 'tn_roof_grin',
+      name: 'ТН-КРОВЛЯ Грин',
+      pattern: /тн[-\s]*кровл[яья]\s*грин(?!\s*(pir|пир))|кровл[яья].*грин(?!\s*(pir|пир))|green\s*roof(?!\s*pir)|озелененн.*кровл|эксплуатируем.*озелен/i,
+    },
+    {
       id: 'tn_roof_standart',
       name: 'ТН-КРОВЛЯ Стандарт',
       pattern: /тн[-\s]*кровл[яья]\s*стандарт|кровл[яья].*стандарт|tn[-\s]*roof.*standart|tn[-\s]*roof.*standard/i,
