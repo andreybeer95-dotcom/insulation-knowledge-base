@@ -1527,6 +1527,12 @@ export async function GET(request: NextRequest) {
   const hasRoofWoolQueryForContext = hasRoofWoolQueryForNomenclature
   const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
   const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
+  const hasRoofSmartSystemQueryForContext =
+    /тн[-\s]*кровл[яья]\s*смарт|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|смарт|smart/i.test(rawQuery) ||
+    (
+      hasPvcMembraneQueryForContext &&
+      /кровл|крыш|профлист|профилирован|механическ|termoclip|термоклип|стеклохолст|расч[её]т|рассчитать|\d+\s*(м2|м²|м\s?кв|кв\.?\s?м)/i.test(rawQuery)
+    )
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
@@ -1540,9 +1546,39 @@ export async function GET(request: NextRequest) {
     return true
   }
 
-  const chunks = isBareThicknessOnly
+  let chunks = isBareThicknessOnly
     ? []
     : deduplicateChunks(rawChunks.filter(chunkMatchesQueryTheme), limitChunks)
+
+  if (!isBareThicknessOnly && hasRoofSmartSystemQueryForContext) {
+    const { data: systemChunkRows, error: systemChunkError } = await supabase
+      .from('document_chunks')
+      .select(`
+        id, content, chunk_index, document_id,
+        doc_type, priority_weight, intent_tags, metadata,
+        documents(id, title, manufacturers(name_ru))
+      `)
+      .contains('metadata', { system_id: 'tn_roof_smart' })
+      .order('chunk_index', { ascending: true })
+      .limit(10)
+
+    if (systemChunkError) {
+      console.warn('Could not load tn_roof_smart system chunks:', systemChunkError.message)
+    } else {
+      const systemChunks = ((systemChunkRows ?? []) as Record<string, unknown>[]).map(normalizeChunk)
+      if (systemChunks.length > 0) {
+        const seenChunkIds = new Set<string>()
+        chunks = [...systemChunks, ...chunks]
+          .filter((chunk) => {
+            const key = chunk.id || `${chunk.document_id}:${chunk.chunk_index}:${chunk.content.slice(0, 80)}`
+            if (seenChunkIds.has(key)) return false
+            seenChunkIds.add(key)
+            return true
+          })
+          .slice(0, Math.max(limitChunks, Math.min(10, systemChunks.length + 2)))
+      }
+    }
+  }
   const { data: rulesData } = await supabase
     .from('selection_rules')
     .select('id, rule_name, condition, rule_text, priority, is_prohibition, category')
@@ -1590,6 +1626,19 @@ export async function GET(request: NextRequest) {
   });
 
   const sortRulesForTopic = (rules: any[]) => {
+    if (hasPvcMembraneQueryForContext) {
+      return [...rules].sort((a, b) => {
+        const score = (rule: any) => {
+          const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+          let value = Number(rule.priority ?? 99) * 10
+          if (hasRoofSmartSystemQueryForContext && /тн[-\s]*кровл[яья]\s*смарт|tn[-\s]*roof[-\s]*smart|tn_roof_smart/i.test(haystack)) value -= 80
+          if (hasRoofSmartSystemQueryForContext && /расх|400|1\s*м2|1\s*м²|комплект|систем|профлист|стеклохолст|termoclip|термоклип|техноруф|паробарьер/i.test(haystack)) value -= 20
+          if (/пластфойл|plastfoil|logicroof|ecoplast|пвх|pvc/i.test(haystack)) value -= 8
+          return value
+        }
+        return score(a) - score(b)
+      })
+    }
     if (!hasConstructionInsulationQueryForContext) return rules
     return [...rules].sort((a, b) => {
       const score = (rule: any) => {
@@ -1938,7 +1987,7 @@ export async function GET(request: NextRequest) {
     strictRuleForTool,
     ...applicable_rules
       .filter((rule) => rule.id !== dbStrictCodeRule?.id && rule.rule_name !== strictRuleForTool.rule_name)
-      .slice(0, 5),
+      .slice(0, hasRoofSmartSystemQueryForContext ? 8 : 5),
   ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
   const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
