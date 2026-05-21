@@ -1527,7 +1527,7 @@ export async function GET(request: NextRequest) {
   const hasRoofWoolQueryForContext = hasRoofWoolQueryForNomenclature
   const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
   const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
-  const systemContextsForQuery = [
+  let systemContextsForQuery = [
     {
       id: 'tn_roof_klassik_prof',
       name: 'ТН-КРОВЛЯ Классик Проф',
@@ -1704,6 +1704,11 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof/i,
     },
   ].filter(system => system.pattern.test(rawQuery))
+  if (systemContextsForQuery.some(system =>
+    ['tn_roof_standart_kms', 'tn_roof_standart_kv', 'tn_roof_standart_trotuar'].includes(system.id)
+  )) {
+    systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_standart')
+  }
   const shouldUseRoofSmartDefaultForContext =
     (
       hasPvcMembraneQueryForContext &&
