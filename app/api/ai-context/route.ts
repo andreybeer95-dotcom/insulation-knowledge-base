@@ -1642,6 +1642,9 @@ export async function GET(request: NextRequest) {
         haystack.includes(system.name.toLowerCase())
       )
       if (isDetectedSystemRule) return true
+      if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
+        return false
+      }
     }
     if (hasVentFacadeQueryForContext) {
       if (/стандарт/i.test(haystack) && !/без кода|не основн|запрет/i.test(haystack)) {
