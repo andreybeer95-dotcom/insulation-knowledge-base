@@ -1527,12 +1527,53 @@ export async function GET(request: NextRequest) {
   const hasRoofWoolQueryForContext = hasRoofWoolQueryForNomenclature
   const hasConstructionInsulationQueryForContext = hasConstructionInsulationQueryForNomenclature
   const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
-  const hasRoofSmartSystemQueryForContext =
-    /тн[-\s]*кровл[яья]\s*смарт|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|смарт|smart/i.test(rawQuery) ||
+  const systemContextsForQuery = [
+    {
+      id: 'tn_roof_smart_pir',
+      name: 'ТН-КРОВЛЯ Смарт PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*смарт\s*pir|смарт\s*pir|smart\s*pir|logicpir\s+prof|логикпир\s+prof|пир.*профлист.*пвх/i,
+    },
+    {
+      id: 'tn_roof_praktik_kley',
+      name: 'ТН-КРОВЛЯ Практик Клей',
+      pattern: /тн[-\s]*кровл[яья]\s*практик\s*клей|практик\s*клей|praktik\s*kley|logicroof\s+bond|v[-\s]*gr\s*fb|osb.*пвх|дерев.*основан.*пвх|клеев.*пвх.*кров|клей.*пвх.*кров/i,
+    },
+    {
+      id: 'tn_facade_profi',
+      name: 'ТН-ФАСАД Профи',
+      pattern: /тн[-\s]*фасад\s*профи|штукатурн.*фасад|мокр.*фасад|сфтk|сфтк|технофас|termoclip.*стен|термоклип.*стен|стеклосетк.*фасад/i,
+    },
+    {
+      id: 'tn_foundation_drainage_kms',
+      name: 'ТН-ФУНДАМЕНТ Дренаж КМС',
+      pattern: /тн[-\s]*фундамент.*дренаж.*кмс|фундамент.*дренаж|дренаж.*фундамент|высок.*грунтов.*вод|техноэласт.*фундамент|planter\s+geo|плантер\s+geo/i,
+    },
+    {
+      id: 'tn_techins_pipeline_pvc',
+      name: 'ТН-ТЕХИЗОЛЯЦИЯ Трубопровод ПВХ',
+      pattern: /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|покровн.*слой.*пвх|цилиндр.*техно\s*80|цилиндр.*техно\s*120|мат.*техно.*пвх/i,
+    },
+    {
+      id: 'tn_roof_smart',
+      name: 'ТН-КРОВЛЯ Смарт',
+      pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof/i,
+    },
+  ].filter(system => system.pattern.test(rawQuery))
+  const shouldUseRoofSmartDefaultForContext =
     (
       hasPvcMembraneQueryForContext &&
       /кровл|крыш|профлист|профилирован|механическ|termoclip|термоклип|стеклохолст|расч[её]т|рассчитать|\d+\s*(м2|м²|м\s?кв|кв\.?\s?м)/i.test(rawQuery)
     )
+  if (shouldUseRoofSmartDefaultForContext && systemContextsForQuery.length === 0) {
+    systemContextsForQuery.push({
+      id: 'tn_roof_smart',
+      name: 'ТН-КРОВЛЯ Смарт',
+      pattern: /./,
+    })
+  }
+  const detectedSystemIdsForContext = [...new Set(systemContextsForQuery.map(system => system.id))]
+  const hasSystemQueryForContext = detectedSystemIdsForContext.length > 0
+  const hasRoofSmartSystemQueryForContext = detectedSystemIdsForContext.includes('tn_roof_smart')
   const chunkMatchesQueryTheme = (chunk: ChunkRow) => {
     const doc = chunk.documents
     const mfrRaw = doc?.manufacturers
@@ -1550,33 +1591,36 @@ export async function GET(request: NextRequest) {
     ? []
     : deduplicateChunks(rawChunks.filter(chunkMatchesQueryTheme), limitChunks)
 
-  if (!isBareThicknessOnly && hasRoofSmartSystemQueryForContext) {
-    const { data: systemChunkRows, error: systemChunkError } = await supabase
-      .from('document_chunks')
-      .select(`
-        id, content, chunk_index, document_id,
-        doc_type, priority_weight, intent_tags, metadata,
-        documents(id, title, manufacturers(name_ru))
-      `)
-      .contains('metadata', { system_id: 'tn_roof_smart' })
-      .order('chunk_index', { ascending: true })
-      .limit(10)
+  if (!isBareThicknessOnly && detectedSystemIdsForContext.length > 0) {
+    const systemChunks: ChunkRow[] = []
+    for (const systemId of detectedSystemIdsForContext) {
+      const { data: systemChunkRows, error: systemChunkError } = await supabase
+        .from('document_chunks')
+        .select(`
+          id, content, chunk_index, document_id,
+          doc_type, priority_weight, intent_tags, metadata,
+          documents(id, title, manufacturers(name_ru))
+        `)
+        .contains('metadata', { system_id: systemId })
+        .order('chunk_index', { ascending: true })
+        .limit(10)
 
-    if (systemChunkError) {
-      console.warn('Could not load tn_roof_smart system chunks:', systemChunkError.message)
-    } else {
-      const systemChunks = ((systemChunkRows ?? []) as Record<string, unknown>[]).map(normalizeChunk)
-      if (systemChunks.length > 0) {
-        const seenChunkIds = new Set<string>()
-        chunks = [...systemChunks, ...chunks]
-          .filter((chunk) => {
-            const key = chunk.id || `${chunk.document_id}:${chunk.chunk_index}:${chunk.content.slice(0, 80)}`
-            if (seenChunkIds.has(key)) return false
-            seenChunkIds.add(key)
-            return true
-          })
-          .slice(0, Math.max(limitChunks, Math.min(10, systemChunks.length + 2)))
+      if (systemChunkError) {
+        console.warn(`Could not load ${systemId} system chunks:`, systemChunkError.message)
+      } else {
+        systemChunks.push(...(((systemChunkRows ?? []) as Record<string, unknown>[]).map(normalizeChunk)))
       }
+    }
+    if (systemChunks.length > 0) {
+      const seenChunkIds = new Set<string>()
+      chunks = [...systemChunks, ...chunks]
+        .filter((chunk) => {
+          const key = chunk.id || `${chunk.document_id}:${chunk.chunk_index}:${chunk.content.slice(0, 80)}`
+          if (seenChunkIds.has(key)) return false
+          seenChunkIds.add(key)
+          return true
+        })
+        .slice(0, Math.max(limitChunks, Math.min(12, systemChunks.length + 2)))
     }
   }
   const { data: rulesData } = await supabase
@@ -1592,6 +1636,13 @@ export async function GET(request: NextRequest) {
     const category = String(rule.category || '').toLowerCase()
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
 
+    if (hasSystemQueryForContext) {
+      const isDetectedSystemRule = systemContextsForQuery.some(system =>
+        haystack.includes(system.id.toLowerCase()) ||
+        haystack.includes(system.name.toLowerCase())
+      )
+      if (isDetectedSystemRule) return true
+    }
     if (hasVentFacadeQueryForContext) {
       if (/стандарт/i.test(haystack) && !/без кода|не основн|запрет/i.test(haystack)) {
         return false
@@ -1626,6 +1677,23 @@ export async function GET(request: NextRequest) {
   });
 
   const sortRulesForTopic = (rules: any[]) => {
+    if (hasSystemQueryForContext) {
+      return [...rules].sort((a, b) => {
+        const score = (rule: any) => {
+          const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+          let value = Number(rule.priority ?? 99) * 10
+          const systemIndex = systemContextsForQuery.findIndex(system =>
+            haystack.includes(system.id.toLowerCase()) ||
+            haystack.includes(system.name.toLowerCase())
+          )
+          if (systemIndex >= 0) value -= 100 - systemIndex
+          if (/система/i.test(haystack)) value -= 10
+          if (/расх|расч[её]т|состав|роли|аналог|огранич/i.test(haystack)) value -= 5
+          return value
+        }
+        return score(a) - score(b)
+      })
+    }
     if (hasPvcMembraneQueryForContext) {
       return [...rules].sort((a, b) => {
         const score = (rule: any) => {
@@ -1987,7 +2055,7 @@ export async function GET(request: NextRequest) {
     strictRuleForTool,
     ...applicable_rules
       .filter((rule) => rule.id !== dbStrictCodeRule?.id && rule.rule_name !== strictRuleForTool.rule_name)
-      .slice(0, hasRoofSmartSystemQueryForContext ? 8 : 5),
+      .slice(0, hasSystemQueryForContext ? 8 : 5),
   ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
   const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : relevant_nomenclature
