@@ -1609,6 +1609,46 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*оптима|кровл[яья].*оптима|tn[-\s]*roof.*optima/i,
     },
     {
+      id: 'tn_roof_ballast_pir',
+      name: 'ТН-КРОВЛЯ Балласт PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*балласт\s*(pir|пир)|балласт\s*(pir|пир)|tn[-\s]*roof.*ballast\s*pir/i,
+    },
+    {
+      id: 'tn_roof_layt_pm',
+      name: 'ТН-КРОВЛЯ Лайт ПМ',
+      pattern: /тн[-\s]*кровл[яья]\s*лайт\s*пм|лайт\s*пм|light\s*pm|layt\s*pm|пвх.*стяжк.*без\s*утепл/i,
+    },
+    {
+      id: 'tn_roof_layt',
+      name: 'ТН-КРОВЛЯ Лайт',
+      pattern: /тн[-\s]*кровл[яья]\s*лайт(?!\s*пм)|кровл[яья].*лайт(?!\s*пм)|tn[-\s]*roof.*(?:light|layt)(?!\s*pm)|неутеплен.*кровл.*стяжк/i,
+    },
+    {
+      id: 'tn_roof_mast',
+      name: 'ТН-КРОВЛЯ Маст',
+      pattern: /тн[-\s]*кровл[яья]\s*маст\b|кровл[яья].*мастик|мастичн.*кровл|tn[-\s]*roof.*mast\b/i,
+    },
+    {
+      id: 'tn_roof_monolit_pir',
+      name: 'ТН-КРОВЛЯ Монолит PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*монолит\s*(pir|пир)|монолит\s*(pir|пир)|monolit\s*pir|monolith\s*pir|logicroof\s+bond.*logicpir/i,
+    },
+    {
+      id: 'tn_roof_prof',
+      name: 'ТН-КРОВЛЯ Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*проф(?!\s*(solid|солид|klassik|классик|fiks|фикс|express|экспресс))|кровл[яья].*проф.*бетон|tn[-\s]*roof.*prof(?!\s*(solid|klassik|fiks|express))/i,
+    },
+    {
+      id: 'tn_roof_solid_prof',
+      name: 'ТН-КРОВЛЯ Солид Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*солид\s*проф|солид\s*проф|solid\s*prof|сэндвич.*ц[-\s]*xps|сендвич.*ц[-\s]*xps/i,
+    },
+    {
+      id: 'tn_roof_solid',
+      name: 'ТН-КРОВЛЯ Солид',
+      pattern: /тн[-\s]*кровл[яья]\s*солид(?!\s*проф)|кровл[яья].*солид(?!\s*проф)|tn[-\s]*roof.*solid(?!\s*prof)/i,
+    },
+    {
       id: 'tn_roof_smart_pir',
       name: 'ТН-КРОВЛЯ Смарт PIR',
       pattern: /тн[-\s]*кровл[яья]\s*смарт\s*pir|смарт\s*pir|smart\s*pir|logicpir\s+prof|логикпир\s+prof|пир.*профлист.*пвх/i,
