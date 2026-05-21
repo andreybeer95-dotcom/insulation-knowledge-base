@@ -1903,7 +1903,7 @@ export async function GET(request: NextRequest) {
   const hasCylinderInResult = relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder')
   const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
 
-  if (queryNumbers.length === 0) {
+  if (queryNumbers.length === 0 && !hasSystemQueryForContext) {
     selection_guidance.clarification_needed = true
     if (hasConstructionInsulationQueryForContext) {
       selection_guidance.questions.push('Уточните толщину утепления и регион строительства.')
@@ -1923,7 +1923,7 @@ export async function GET(request: NextRequest) {
     ]
   }
 
-  if (relevant_nomenclature.length > 1 && !hasConstructionInsulationQueryForContext) {
+  if (relevant_nomenclature.length > 1 && !hasConstructionInsulationQueryForContext && !hasSystemQueryForContext) {
     selection_guidance.clarification_needed = true
     selection_guidance.questions.push('Найдено несколько позиций одного размера. Уточните точный вариант, который нужен клиенту.')
   }
@@ -2067,7 +2067,9 @@ export async function GET(request: NextRequest) {
     ...invoiceStatusLines,
     '',
     '## Основные позиции 1С',
-    ...(shortInvoiceItems.length > 0
+    ...(hasSystemQueryForContext
+      ? ['- Системные позиции и коды 1С переданы в rules по ролям выбранной системы.']
+      : shortInvoiceItems.length > 0
       ? shortInvoiceItems.slice(0, 8).map((n) => {
       const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
       const articlePart = n.article ? ` | article: ${n.article}` : ''
