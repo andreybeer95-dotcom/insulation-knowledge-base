@@ -1529,6 +1529,106 @@ export async function GET(request: NextRequest) {
   const hasPvcMembraneQueryForContext = hasPvcMembraneQueryForNomenclature
   let systemContextsForQuery = [
     {
+      id: 'tn_shinglas_mansarda_kontr_pir',
+      name: 'ТН-ШИНГЛАС Мансарда Контр PIR',
+      pattern: /тн[-\s]*шинглас\s*мансард[аы]\s*контр\s*(pir|пир)|шинглас.*мансард[аы].*контр.*(pir|пир)|shinglas.*mansard.*kontr.*pir/i,
+    },
+    {
+      id: 'tn_shinglas_mansarda_pir',
+      name: 'ТН-ШИНГЛАС Мансарда PIR',
+      pattern: /тн[-\s]*шинглас\s*мансард[аы]\s*(pir|пир)|шинглас.*мансард[аы].*(pir|пир)|shinglas.*mansard.*pir/i,
+    },
+    {
+      id: 'tn_shinglas_mansarda',
+      name: 'ТН-ШИНГЛАС Мансарда',
+      pattern: /тн[-\s]*шинглас\s*мансард[аы](?!.*(pir|пир|контр))|шинглас.*мансард[аы](?!.*(pir|пир|контр))|shinglas.*mansard(?!.*pir)/i,
+    },
+    {
+      id: 'tn_shinglas_klassik_fleym',
+      name: 'ТН-ШИНГЛАС КЛАССИК ФЛЭЙМ',
+      pattern: /тн[-\s]*шинглас\s*классик\s*фл[эе]йм|шинглас.*классик.*фл[эе]йм|anderep\s*flame|flame.*shinglas|fleym.*shinglas/i,
+    },
+    {
+      id: 'tn_shinglas_klassik',
+      name: 'ТН-ШИНГЛАС Классик',
+      pattern: /тн[-\s]*шинглас\s*классик(?!.*фл[эе]йм)|шинглас.*классик(?!.*фл[эе]йм)|shinglas.*classic(?!.*flame)/i,
+    },
+    {
+      id: 'tn_falts_mansarda',
+      name: 'ТН-ФАЛЬЦ Мансарда',
+      pattern: /тн[-\s]*фальц\s*мансард[аы]|фальц.*мансард[аы]|клик[-\s]*фальц.*мансард[аы]|falz.*mansard|falts.*mansard/i,
+    },
+    {
+      id: 'tn_lyuksard_mansarda',
+      name: 'ТН-ЛЮКСАРД Мансарда',
+      pattern: /тн[-\s]*(люксард|luxard)\s*мансард[аы]|(люксард|luxard).*мансард[аы]|luxard.*mansard/i,
+    },
+    {
+      id: 'tn_lyuksard_klassik',
+      name: 'ТН-ЛЮКСАРД Классик',
+      pattern: /тн[-\s]*(люксард|luxard)\s*классик|(люксард|luxard).*классик|luxard.*classic/i,
+    },
+    {
+      id: 'tn_stilobat_ekspert_trotuar',
+      name: 'ТН-СТИЛОБАТ ЭКСПЕРТ ТРОТУАР',
+      pattern: /тн[-\s]*стилобат\s*эксперт\s*тротуар|стилобат.*эксперт.*тротуар|stilobat.*expert.*trotuar/i,
+    },
+    {
+      id: 'tn_stilobat_standart_trotuar',
+      name: 'ТН-СТИЛОБАТ СТАНДАРТ ТРОТУАР',
+      pattern: /тн[-\s]*стилобат\s*стандарт\s*тротуар|стилобат.*стандарт.*тротуар|stilobat.*standart.*trotuar|stilobat.*standard.*trotuar/i,
+    },
+    {
+      id: 'tn_stilobat_klassik_trotuar',
+      name: 'ТН-СТИЛОБАТ КЛАССИК ТРОТУАР',
+      pattern: /тн[-\s]*стилобат\s*классик\s*тротуар|стилобат.*классик.*тротуар|stilobat.*klassik.*trotuar|stilobat.*classic.*trotuar/i,
+    },
+    {
+      id: 'tn_stilobat_trotuar',
+      name: 'ТН-СТИЛОБАТ ТРОТУАР',
+      pattern: /тн[-\s]*стилобат\s*тротуар(?!.*(эксперт|стандарт|классик))|стилобат.*тротуар(?!.*(эксперт|стандарт|классик))|stilobat.*trotuar(?!.*(expert|standart|standard|klassik|classic))/i,
+    },
+    {
+      id: 'tn_stilobat_ekspert_avto',
+      name: 'ТН-СТИЛОБАТ ЭКСПЕРТ АВТО',
+      pattern: /тн[-\s]*стилобат\s*эксперт\s*авто|стилобат.*эксперт.*авто|stilobat.*expert.*auto|stilobat.*expert.*avto/i,
+    },
+    {
+      id: 'tn_stilobat_standart_avto',
+      name: 'ТН-СТИЛОБАТ СТАНДАРТ АВТО',
+      pattern: /тн[-\s]*стилобат\s*стандарт\s*авто|стилобат.*стандарт.*авто|stilobat.*standart.*auto|stilobat.*standard.*avto/i,
+    },
+    {
+      id: 'tn_stilobat_klassik_avto',
+      name: 'ТН-СТИЛОБАТ КЛАССИК АВТО',
+      pattern: /тн[-\s]*стилобат\s*классик\s*авто|стилобат.*классик.*авто|stilobat.*klassik.*auto|stilobat.*classic.*avto/i,
+    },
+    {
+      id: 'tn_stilobat_avto',
+      name: 'ТН-СТИЛОБАТ АВТО',
+      pattern: /тн[-\s]*стилобат\s*авто(?!.*(эксперт|стандарт|классик))|стилобат.*авто(?!.*(эксперт|стандарт|классик))|stilobat.*(auto|avto)(?!.*(expert|standart|standard|klassik|classic))/i,
+    },
+    {
+      id: 'tn_stilobat_ekspert_grin',
+      name: 'ТН-СТИЛОБАТ ЭКСПЕРТ ГРИН',
+      pattern: /тн[-\s]*стилобат\s*эксперт\s*грин|стилобат.*эксперт.*грин|stilobat.*expert.*grin|stilobat.*expert.*green/i,
+    },
+    {
+      id: 'tn_stilobat_standart_grin',
+      name: 'ТН-СТИЛОБАТ СТАНДАРТ ГРИН',
+      pattern: /тн[-\s]*стилобат\s*стандарт\s*грин|стилобат.*стандарт.*грин|stilobat.*standart.*grin|stilobat.*standard.*green/i,
+    },
+    {
+      id: 'tn_stilobat_klassik_grin',
+      name: 'ТН-СТИЛОБАТ КЛАССИК ГРИН',
+      pattern: /тн[-\s]*стилобат\s*классик\s*грин|стилобат.*классик.*грин|stilobat.*klassik.*grin|stilobat.*classic.*green/i,
+    },
+    {
+      id: 'tn_stilobat_grin',
+      name: 'ТН-СТИЛОБАТ ГРИН',
+      pattern: /тн[-\s]*стилобат\s*грин(?!.*(эксперт|стандарт|классик))|стилобат.*грин(?!.*(эксперт|стандарт|классик))|stilobat.*(grin|green)(?!.*(expert|standart|standard|klassik|classic))/i,
+    },
+    {
       id: 'tn_roof_klassik_prof',
       name: 'ТН-КРОВЛЯ Классик Проф',
       pattern: /тн[-\s]*кровл[яья]\s*классик\s*проф|классик\s*проф|klassik\s*prof/i,
@@ -1912,6 +2012,84 @@ export async function GET(request: NextRequest) {
     ['tn_roof_smart_c_xps', ['tn_roof_smart', 'tn_roof_smart_pir', 'tn_roof_solid_prof']],
   ]
   for (const [preferredId, suppressedIds] of roofBatch8SpecificityFilters) {
+    if (systemContextsForQuery.some(system => system.id === preferredId)) {
+      systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
+    }
+  }
+  const pitchedRoofSystemIds = [
+    'tn_shinglas_mansarda_kontr_pir',
+    'tn_shinglas_mansarda_pir',
+    'tn_shinglas_mansarda',
+    'tn_shinglas_klassik_fleym',
+    'tn_shinglas_klassik',
+    'tn_falts_mansarda',
+    'tn_lyuksard_mansarda',
+    'tn_lyuksard_klassik',
+  ]
+  const genericRoofSystemIdsForPitched = [
+    'tn_roof_klassik',
+    'tn_roof_klassik_prof',
+    'tn_roof_falts_klassik',
+    'tn_roof_falts_layt',
+    'tn_roof_layt',
+    'tn_roof_smart',
+  ]
+  if (systemContextsForQuery.some(system => pitchedRoofSystemIds.includes(system.id))) {
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      pitchedRoofSystemIds.includes(system.id) || !genericRoofSystemIdsForPitched.includes(system.id)
+    )
+  }
+  const pitchedSpecificityFilters: Array<[string, string[]]> = [
+    ['tn_shinglas_mansarda_kontr_pir', ['tn_shinglas_mansarda_pir', 'tn_shinglas_mansarda', 'tn_shinglas_klassik']],
+    ['tn_shinglas_mansarda_pir', ['tn_shinglas_mansarda', 'tn_shinglas_klassik']],
+    ['tn_shinglas_mansarda', ['tn_shinglas_klassik']],
+    ['tn_shinglas_klassik_fleym', ['tn_shinglas_klassik']],
+    ['tn_lyuksard_mansarda', ['tn_lyuksard_klassik']],
+  ]
+  for (const [preferredId, suppressedIds] of pitchedSpecificityFilters) {
+    if (systemContextsForQuery.some(system => system.id === preferredId)) {
+      systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
+    }
+  }
+  const stylobateSystemIds = [
+    'tn_stilobat_ekspert_trotuar',
+    'tn_stilobat_standart_trotuar',
+    'tn_stilobat_klassik_trotuar',
+    'tn_stilobat_trotuar',
+    'tn_stilobat_ekspert_avto',
+    'tn_stilobat_standart_avto',
+    'tn_stilobat_klassik_avto',
+    'tn_stilobat_avto',
+    'tn_stilobat_ekspert_grin',
+    'tn_stilobat_standart_grin',
+    'tn_stilobat_klassik_grin',
+    'tn_stilobat_grin',
+  ]
+  const genericRoofSystemIdsForStylobate = [
+    'tn_roof_standart_trotuar',
+    'tn_roof_trotuar',
+    'tn_roof_barrier_trotuar',
+    'tn_roof_grin',
+    'tn_roof_grin_pir',
+    'tn_roof_standart',
+  ]
+  if (systemContextsForQuery.some(system => stylobateSystemIds.includes(system.id))) {
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      stylobateSystemIds.includes(system.id) || !genericRoofSystemIdsForStylobate.includes(system.id)
+    )
+  }
+  const stylobateSpecificityFilters: Array<[string, string[]]> = [
+    ['tn_stilobat_ekspert_trotuar', ['tn_stilobat_trotuar']],
+    ['tn_stilobat_standart_trotuar', ['tn_stilobat_trotuar']],
+    ['tn_stilobat_klassik_trotuar', ['tn_stilobat_trotuar']],
+    ['tn_stilobat_ekspert_avto', ['tn_stilobat_avto']],
+    ['tn_stilobat_standart_avto', ['tn_stilobat_avto']],
+    ['tn_stilobat_klassik_avto', ['tn_stilobat_avto']],
+    ['tn_stilobat_ekspert_grin', ['tn_stilobat_grin']],
+    ['tn_stilobat_standart_grin', ['tn_stilobat_grin']],
+    ['tn_stilobat_klassik_grin', ['tn_stilobat_grin']],
+  ]
+  for (const [preferredId, suppressedIds] of stylobateSpecificityFilters) {
     if (systemContextsForQuery.some(system => system.id === preferredId)) {
       systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
     }
