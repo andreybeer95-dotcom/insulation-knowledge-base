@@ -2120,8 +2120,7 @@ export async function GET(request: NextRequest) {
       const isDetectedSystemRule = isRuleForDetectedSystem(rule)
       if (isDetectedSystemRule) return true
       const isGlobalGroundingRule =
-        /глобально|код[ыа]?\s*1с|не\s+выдум|только\s+из\s+контекст|без\s+проверк/i.test(haystack) &&
-        /контекст|код|1с|проверк/i.test(haystack)
+        /глобально|не\s+выдум|только\s+из\s+контекст|код[ыа]?\s*1с\s+только\s+из/i.test(String(rule.rule_name || '').toLowerCase())
       if (isGlobalGroundingRule) return true
       if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
         return false
