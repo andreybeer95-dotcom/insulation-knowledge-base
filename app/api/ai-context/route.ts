@@ -1769,6 +1769,81 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*каркас\s*стандарт(?!\s*(террас|клин))|каркас\s*стандарт(?!.*(террас|клин))|karkas.*standart(?!.*(terrasa|terrace|klin|slope))|karkas.*standard(?!.*(terrace|slope))|frame.*standard(?!.*(terrace|slope))/i,
     },
     {
+      id: 'tn_roof_garant_re30',
+      name: 'ТН-КРОВЛЯ Гарант RE30',
+      pattern: /тн[-\s]*кровл[яья]\s*гарант\s*re30|гарант\s*re30|garant\s*re30|гарант.*огнезащит.*re30|пвх.*pir.*re30/i,
+    },
+    {
+      id: 'tn_roof_master_re30',
+      name: 'ТН-КРОВЛЯ МАСТЕР RE30',
+      pattern: /тн[-\s]*кровл[яья]\s*мастер\s*re30|мастер\s*re30|master\s*re30|мастер.*огнезащит.*re30|битум.*pir.*re30/i,
+    },
+    {
+      id: 'tn_roof_solo_layt',
+      name: 'ТН-КРОВЛЯ Соло Лайт',
+      pattern: /тн[-\s]*кровл[яья]\s*соло\s*лайт|соло\s*лайт|solo\s*(layt|light)|техноэласт\s*соло.*неутепл/i,
+    },
+    {
+      id: 'tn_roof_solo_prof',
+      name: 'ТН-КРОВЛЯ Соло Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*соло\s*проф|соло\s*проф|solo\s*prof|техноэласт\s*соло.*техноруф/i,
+    },
+    {
+      id: 'tn_roof_smart_solo',
+      name: 'ТН-КРОВЛЯ Смарт Соло',
+      pattern: /тн[-\s]*кровл[яья]\s*смарт\s*соло|смарт\s*соло|smart\s*solo|смарт.*техноэласт\s*соло/i,
+    },
+    {
+      id: 'tn_roof_fiks_pir',
+      name: 'ТН-КРОВЛЯ ФИКС PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*фикс\s*(pir|пир)|фикс\s*(pir|пир)|fiks\s*pir|fix\s*pir|техноэласт\s*фикс.*logicpir/i,
+    },
+    {
+      id: 'tn_roof_solo_pir',
+      name: 'ТН-КРОВЛЯ СОЛО PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*соло\s*(pir|пир)|соло\s*(pir|пир)|solo\s*pir|техноэласт\s*соло.*logicpir/i,
+    },
+    {
+      id: 'tn_roof_master_pir',
+      name: 'ТН-КРОВЛЯ Мастер PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*мастер\s*(pir|пир)|мастер\s*(pir|пир)|master\s*pir|мастер.*logicpir|унифлекс\s*с\s*эмс.*logicpir/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik_pir_re30',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик PIR RE30',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик\s*(pir|пир)\s*re30|фальц\s*классик\s*(pir|пир).*re30|falts.*classic.*pir.*re30|logicfalz.*pir.*re30/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik_sv_re30',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик СВ RE30',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик\s*св\s*re30|фальц\s*классик\s*св.*re30|falts.*classic.*sv.*re30|logicfalz.*св.*re30/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik_re30',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик RE30',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик\s*re30|фальц\s*классик.*re30|falts.*classic.*re30|logicfalz.*re30/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik_pir',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик PIR',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик\s*(pir|пир)|фальц\s*классик\s*(pir|пир)|falts.*classic.*pir|logicfalz.*pir/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik_sv',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик СВ',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик\s*св|фальц\s*классик\s*св|falts.*classic.*sv|logicfalz.*св/i,
+    },
+    {
+      id: 'tn_roof_falts_layt',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Лайт',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*лайт|фальц\s*лайт|falts.*layt|falts.*light|logicfalz.*без\s*утепл/i,
+    },
+    {
+      id: 'tn_roof_falts_klassik',
+      name: 'ТН-КРОВЛЯ ФАЛЬЦ Классик',
+      pattern: /тн[-\s]*кровл[яья]\s*фальц\s*классик(?!\s*(pir|пир|св|re30))|фальц\s*классик(?!.*(pir|пир|св|re30))|falts.*classic(?!.*(pir|sv|re30))|logicfalz|фальцевая\s*картина/i,
+    },
+    {
       id: 'tn_facade_profi',
       name: 'ТН-ФАСАД Профи',
       pattern: /тн[-\s]*фасад\s*профи|штукатурн.*фасад|мокр.*фасад|сфтk|сфтк|технофас|termoclip.*стен|термоклип.*стен|стеклосетк.*фасад/i,
@@ -1829,6 +1904,51 @@ export async function GET(request: NextRequest) {
   if (systemContextsForQuery.some(system => karkasSystemIds.includes(system.id))) {
     systemContextsForQuery = systemContextsForQuery.filter(system =>
       karkasSystemIds.includes(system.id) || !genericRoofSystemIdsForKarkas.includes(system.id)
+    )
+  }
+  const faltsSystemIds = [
+    'tn_roof_falts_klassik_pir_re30',
+    'tn_roof_falts_klassik_sv_re30',
+    'tn_roof_falts_klassik_re30',
+    'tn_roof_falts_klassik_pir',
+    'tn_roof_falts_klassik_sv',
+    'tn_roof_falts_layt',
+    'tn_roof_falts_klassik',
+  ]
+  const genericRoofSystemIdsForFalts = [
+    'tn_roof_klassik',
+    'tn_roof_klassik_prof',
+    'tn_roof_layt',
+    'tn_roof_layt_pm',
+    'tn_roof_smart',
+  ]
+  if (systemContextsForQuery.some(system => faltsSystemIds.includes(system.id))) {
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      faltsSystemIds.includes(system.id) || !genericRoofSystemIdsForFalts.includes(system.id)
+    )
+  }
+  const roofTailSystemIds = [
+    'tn_roof_garant_re30',
+    'tn_roof_master_re30',
+    'tn_roof_solo_layt',
+    'tn_roof_solo_prof',
+    'tn_roof_smart_solo',
+    'tn_roof_fiks_pir',
+    'tn_roof_solo_pir',
+    'tn_roof_master_pir',
+  ]
+  const genericRoofSystemIdsForTail = [
+    'tn_roof_garant_plus',
+    'tn_roof_master',
+    'tn_roof_master_solo',
+    'tn_roof_solo',
+    'tn_roof_smart',
+    'tn_roof_fiks',
+    'tn_roof_layt',
+  ]
+  if (systemContextsForQuery.some(system => roofTailSystemIds.includes(system.id))) {
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      roofTailSystemIds.includes(system.id) || !genericRoofSystemIdsForTail.includes(system.id)
     )
   }
   const shouldUseRoofSmartDefaultForContext =
