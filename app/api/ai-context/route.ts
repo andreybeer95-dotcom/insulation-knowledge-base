@@ -2015,6 +2015,15 @@ export async function GET(request: NextRequest) {
   const detectedSystemIdsForContext = [...new Set(systemContextsForQuery.map(system => system.id))]
   const hasSystemQueryForContext = detectedSystemIdsForContext.length > 0
   const hasRoofSmartSystemQueryForContext = detectedSystemIdsForContext.includes('tn_roof_smart')
+  const bitumenRoofSystemIdsForContext = new Set([
+    'tn_roof_titan_layt',
+    'tn_roof_express_solid_prof',
+    'tn_roof_master_s',
+    'tn_roof_smart_c_xps',
+  ])
+  const hasBitumenRoofSystemQueryForContext = detectedSystemIdsForContext.some(systemId =>
+    bitumenRoofSystemIdsForContext.has(systemId)
+  )
   const isRuleForDetectedSystem = (rule: any) => {
     const ruleName = String(rule.rule_name || '').toLowerCase()
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
@@ -2111,6 +2120,12 @@ export async function GET(request: NextRequest) {
       const isDetectedSystemRule = isRuleForDetectedSystem(rule)
       if (isDetectedSystemRule) return true
       if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
+        return false
+      }
+      if (
+        hasBitumenRoofSystemQueryForContext &&
+        /пвх|pvc|logicroof|ecoplast|пластфойл|v[-\s]*(rp|gr)|tn_roof_smart/i.test(haystack)
+      ) {
         return false
       }
     }
