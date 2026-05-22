@@ -1554,6 +1554,11 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*соло(?!\s*(пир|pir|лайт|проф))|кровл[яья].*соло(?!\s*(пир|pir|лайт|проф))|tn[-\s]*roof.*solo(?!\s*(pir|light|prof))/i,
     },
     {
+      id: 'tn_roof_titan_layt',
+      name: 'ТН-КРОВЛЯ Титан Лайт',
+      pattern: /тн[-\s]*кровл[яья]\s*титан\s*лайт|титан\s*лайт|titan\s*(layt|light)/i,
+    },
+    {
       id: 'tn_roof_titan',
       name: 'ТН-КРОВЛЯ Титан',
       pattern: /тн[-\s]*кровл[яья]\s*титан|кровл[яья].*титан|tn[-\s]*roof.*titan/i,
@@ -1569,6 +1574,11 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*фикс(?!\s*(проф|pir|пир))|кровл[яья].*фикс(?!\s*(проф|pir|пир))|tn[-\s]*roof.*(?:fix|fiks)(?!\s*(prof|pir))/i,
     },
     {
+      id: 'tn_roof_express_solid_prof',
+      name: 'ТН-КРОВЛЯ Экспресс Солид Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*экспресс\s*солид\s*проф|экспресс\s*солид\s*проф|express\s*solid\s*prof/i,
+    },
+    {
       id: 'tn_roof_express_klassik_prof',
       name: 'ТН-КРОВЛЯ Экспресс Классик Проф',
       pattern: /тн[-\s]*кровл[яья]\s*экспресс\s*классик\s*проф|экспресс\s*классик\s*проф|express\s*klassik\s*prof/i,
@@ -1582,6 +1592,11 @@ export async function GET(request: NextRequest) {
       id: 'tn_roof_garant_plus',
       name: 'ТН-КРОВЛЯ Гарант Плюс',
       pattern: /тн[-\s]*кровл[яья]\s*гарант\s*плюс|гарант\s*плюс|garant\s*plus/i,
+    },
+    {
+      id: 'tn_roof_master_s',
+      name: 'ТН-КРОВЛЯ Мастер С',
+      pattern: /тн[-\s]*кровл[яья]\s*мастер\s*с(?!оло)|мастер\s*с(?!оло)|master\s*s\b/i,
     },
     {
       id: 'tn_roof_master',
@@ -1629,6 +1644,11 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*инверс|кровл[яья].*инверс|инверсионн.*кровл|tn[-\s]*roof.*invers|inversion/i,
     },
     {
+      id: 'tn_roof_monolit_optima',
+      name: 'ТН-КРОВЛЯ Монолит Оптима',
+      pattern: /тн[-\s]*кровл[яья]\s*монолит\s*оптима|монолит\s*оптима|monolit\s*optima|monolith\s*optima/i,
+    },
+    {
       id: 'tn_roof_optima',
       name: 'ТН-КРОВЛЯ Оптима',
       pattern: /тн[-\s]*кровл[яья]\s*оптима|кровл[яья].*оптима|tn[-\s]*roof.*optima/i,
@@ -1662,6 +1682,11 @@ export async function GET(request: NextRequest) {
       id: 'tn_roof_prof',
       name: 'ТН-КРОВЛЯ Проф',
       pattern: /тн[-\s]*кровл[яья]\s*проф(?!\s*(solid|солид|klassik|классик|fiks|фикс|express|экспресс))|кровл[яья].*проф.*бетон|tn[-\s]*roof.*prof(?!\s*(solid|klassik|fiks|express))/i,
+    },
+    {
+      id: 'tn_roof_smart_c_xps',
+      name: 'ТН-КРОВЛЯ СМАРТ Ц-XPS',
+      pattern: /тн[-\s]*кровл[яья]\s*смарт\s*(ц|c|ts)[-\s]*xps|смарт\s*(ц|c|ts)[-\s]*xps|smart\s*(c|ts)[-\s]*xps|смарт.*сэндвич.*ц[-\s]*xps|смарт.*сендвич.*ц[-\s]*xps|сэндвич.*ц[-\s]*xps.*профлист|сендвич.*ц[-\s]*xps.*профлист/i,
     },
     {
       id: 'tn_roof_solid_prof',
@@ -1873,6 +1898,18 @@ export async function GET(request: NextRequest) {
     ['tn_roof_praktik_c_xps', 'tn_roof_praktik_xps', 'tn_roof_praktik_kley'].includes(system.id)
   )) {
     systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_praktik')
+  }
+  const roofBatch8SpecificityFilters: Array<[string, string[]]> = [
+    ['tn_roof_titan_layt', ['tn_roof_titan', 'tn_roof_layt']],
+    ['tn_roof_express_solid_prof', ['tn_roof_solid_prof', 'tn_roof_express_klassik_prof', 'tn_roof_express_klassik']],
+    ['tn_roof_master_s', ['tn_roof_master']],
+    ['tn_roof_monolit_optima', ['tn_roof_optima', 'tn_roof_monolit_pir']],
+    ['tn_roof_smart_c_xps', ['tn_roof_smart', 'tn_roof_smart_pir', 'tn_roof_solid_prof']],
+  ]
+  for (const [preferredId, suppressedIds] of roofBatch8SpecificityFilters) {
+    if (systemContextsForQuery.some(system => system.id === preferredId)) {
+      systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
+    }
   }
   if (systemContextsForQuery.some(system => system.id === 'tn_roof_barrier_trotuar')) {
     systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_trotuar')
