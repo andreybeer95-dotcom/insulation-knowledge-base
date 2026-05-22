@@ -1927,6 +1927,18 @@ export async function GET(request: NextRequest) {
       faltsSystemIds.includes(system.id) || !genericRoofSystemIdsForFalts.includes(system.id)
     )
   }
+  const faltsSpecificityFilters: Array<[string, string[]]> = [
+    ['tn_roof_falts_klassik_pir_re30', ['tn_roof_falts_klassik_re30', 'tn_roof_falts_klassik_pir', 'tn_roof_falts_klassik']],
+    ['tn_roof_falts_klassik_sv_re30', ['tn_roof_falts_klassik_re30', 'tn_roof_falts_klassik_sv', 'tn_roof_falts_klassik']],
+    ['tn_roof_falts_klassik_re30', ['tn_roof_falts_klassik']],
+    ['tn_roof_falts_klassik_pir', ['tn_roof_falts_klassik']],
+    ['tn_roof_falts_klassik_sv', ['tn_roof_falts_klassik']],
+  ]
+  for (const [preferredId, suppressedIds] of faltsSpecificityFilters) {
+    if (systemContextsForQuery.some(system => system.id === preferredId)) {
+      systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
+    }
+  }
   const roofTailSystemIds = [
     'tn_roof_garant_re30',
     'tn_roof_master_re30',
