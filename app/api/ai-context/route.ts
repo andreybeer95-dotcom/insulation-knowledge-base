@@ -1679,9 +1679,44 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*смарт\s*pir|смарт\s*pir|smart\s*pir|logicpir\s+prof|логикпир\s+prof|пир.*профлист.*пвх/i,
     },
     {
+      id: 'tn_roof_praktik_c_xps',
+      name: 'ТН-КРОВЛЯ Практик Ц-XPS',
+      pattern: /тн[-\s]*кровл[яья]\s*практик\s*(ц|c|ts)[-\s]*xps|практик\s*(ц|c|ts)[-\s]*xps|praktik\s*(c|ts)[-\s]*xps|практик.*теплостяжк|практик.*сэндвич.*ц[-\s]*xps|практик.*сендвич.*ц[-\s]*xps/i,
+    },
+    {
+      id: 'tn_roof_praktik_xps',
+      name: 'ТН-КРОВЛЯ Практик XPS',
+      pattern: /тн[-\s]*кровл[яья]\s*практик\s*xps|практик\s*xps|praktik\s*xps|дерев.*основан.*xps.*пвх|osb.*xps.*пвх/i,
+    },
+    {
+      id: 'tn_roof_praktik',
+      name: 'ТН-КРОВЛЯ Практик',
+      pattern: /тн[-\s]*кровл[яья]\s*практик(?!\s*(клей|xps|ц|c|ts))|кровл[яья].*практик(?!.*(клей|xps|ц[-\s]*xps|c[-\s]*xps|ts[-\s]*xps))|praktik(?!\s*(kley|xps|c|ts))/i,
+    },
+    {
       id: 'tn_roof_praktik_kley',
       name: 'ТН-КРОВЛЯ Практик Клей',
       pattern: /тн[-\s]*кровл[яья]\s*практик\s*клей|практик\s*клей|praktik\s*kley|logicroof\s+bond|v[-\s]*gr\s*fb|osb.*пвх|дерев.*основан.*пвх|клеев.*пвх.*кров|клей.*пвх.*кров/i,
+    },
+    {
+      id: 'tn_roof_barrier_trotuar',
+      name: 'ТН-КРОВЛЯ Барьер Тротуар',
+      pattern: /тн[-\s]*кровл[яья]\s*барьер\s*тротуар|барьер\s*тротуар|barer\s*trotuar|barrier\s*trotuar|logicbase\s+v[-\s]*sl.*тротуар/i,
+    },
+    {
+      id: 'tn_roof_terrasa',
+      name: 'ТН-КРОВЛЯ Терраса',
+      pattern: /тн[-\s]*кровл[яья]\s*террас|кровл[яья].*террас|террасн.*кровл|terrasa|terrace|v[-\s]*gr.*террас|регулируем.*опор.*кровл/i,
+    },
+    {
+      id: 'tn_roof_trotuar',
+      name: 'ТН-КРОВЛЯ Тротуар',
+      pattern: /тн[-\s]*кровл[яья]\s*тротуар(?!\s*(стандарт|барьер))|кровл[яья]\s*тротуар|tn[-\s]*roof.*trotuar/i,
+    },
+    {
+      id: 'tn_roof_universal',
+      name: 'ТН-КРОВЛЯ Универсал',
+      pattern: /тн[-\s]*кровл[яья]\s*универсал|кровл[яья].*универсал|tn[-\s]*roof.*universal|universal|унифлекс\s+вент.*пламя\s*стоп|пламя\s*стоп.*xps.*технобарьер/i,
     },
     {
       id: 'tn_facade_profi',
@@ -1708,6 +1743,17 @@ export async function GET(request: NextRequest) {
     ['tn_roof_standart_kms', 'tn_roof_standart_kv', 'tn_roof_standart_trotuar'].includes(system.id)
   )) {
     systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_standart')
+  }
+  if (systemContextsForQuery.some(system =>
+    ['tn_roof_praktik_c_xps', 'tn_roof_praktik_xps', 'tn_roof_praktik_kley'].includes(system.id)
+  )) {
+    systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_praktik')
+  }
+  if (systemContextsForQuery.some(system => system.id === 'tn_roof_barrier_trotuar')) {
+    systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_trotuar')
+  }
+  if (systemContextsForQuery.some(system => system.id === 'tn_roof_standart_trotuar')) {
+    systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_trotuar')
   }
   const shouldUseRoofSmartDefaultForContext =
     (
