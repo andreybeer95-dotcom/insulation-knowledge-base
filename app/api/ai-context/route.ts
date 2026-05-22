@@ -1719,6 +1719,56 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*универсал|кровл[яья].*универсал|tn[-\s]*roof.*universal|universal|унифлекс\s+вент.*пламя\s*стоп|пламя\s*стоп.*xps.*технобарьер/i,
     },
     {
+      id: 'tn_roof_karkas_layt_terrasa_pm',
+      name: 'ТН-КРОВЛЯ КАРКАС Лайт Терраса ПМ',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*лайт\s*террас[аы]\s*пм|каркас\s*лайт\s*террас[аы]\s*пм|karkas.*layt.*terrasa.*pm|frame.*light.*terrace.*pm/i,
+    },
+    {
+      id: 'tn_roof_karkas_layt_terrasa',
+      name: 'ТН-КРОВЛЯ КАРКАС Лайт Терраса',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*лайт\s*террас[аы](?!\s*пм)|каркас\s*лайт\s*террас[аы](?!.*пм)|karkas.*layt.*terrasa(?!.*pm)|frame.*light.*terrace(?!.*pm)/i,
+    },
+    {
+      id: 'tn_roof_karkas_layt_pm',
+      name: 'ТН-КРОВЛЯ КАРКАС Лайт ПМ',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*лайт\s*пм|каркас\s*лайт\s*пм|karkas.*layt.*pm|frame.*light.*pm/i,
+    },
+    {
+      id: 'tn_roof_karkas_layt',
+      name: 'ТН-КРОВЛЯ КАРКАС Лайт',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*лайт(?!\s*(пм|террас))|каркас\s*лайт(?!.*(пм|террас))|karkas.*layt(?!.*(pm|terrasa|terrace))|frame.*light(?!.*(pm|terrace))/i,
+    },
+    {
+      id: 'tn_roof_karkas_prof_terrasa',
+      name: 'ТН-КРОВЛЯ КАРКАС Проф Терраса',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*проф\s*террас[аы]|каркас\s*проф\s*террас[аы]|karkas.*prof.*terrasa|frame.*prof.*terrace/i,
+    },
+    {
+      id: 'tn_roof_karkas_standart_terrasa',
+      name: 'ТН-КРОВЛЯ КАРКАС Стандарт Терраса',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*стандарт\s*террас[аы]|каркас\s*стандарт\s*террас[аы]|karkas.*standart.*terrasa|karkas.*standard.*terrace|frame.*standard.*terrace/i,
+    },
+    {
+      id: 'tn_roof_karkas_prof_klin',
+      name: 'ТН-КРОВЛЯ КАРКАС Проф Клин',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*проф\s*клин|каркас\s*проф\s*клин|karkas.*prof.*klin|frame.*prof.*slope|каркас.*проф.*уклон/i,
+    },
+    {
+      id: 'tn_roof_karkas_standart_klin',
+      name: 'ТН-КРОВЛЯ КАРКАС Стандарт Клин',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*стандарт\s*клин|каркас\s*стандарт\s*клин|karkas.*standart.*klin|karkas.*standard.*slope|каркас.*стандарт.*уклон/i,
+    },
+    {
+      id: 'tn_roof_karkas_prof',
+      name: 'ТН-КРОВЛЯ КАРКАС Проф',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*проф(?!\s*(террас|клин))|каркас\s*проф(?!.*(террас|клин))|karkas.*prof(?!.*(terrasa|terrace|klin|slope))|frame.*prof(?!.*(terrace|slope))/i,
+    },
+    {
+      id: 'tn_roof_karkas_standart',
+      name: 'ТН-КРОВЛЯ КАРКАС Стандарт',
+      pattern: /тн[-\s]*кровл[яья]\s*каркас\s*стандарт(?!\s*(террас|клин))|каркас\s*стандарт(?!.*(террас|клин))|karkas.*standart(?!.*(terrasa|terrace|klin|slope))|karkas.*standard(?!.*(terrace|slope))|frame.*standard(?!.*(terrace|slope))/i,
+    },
+    {
       id: 'tn_facade_profi',
       name: 'ТН-ФАСАД Профи',
       pattern: /тн[-\s]*фасад\s*профи|штукатурн.*фасад|мокр.*фасад|сфтk|сфтк|технофас|termoclip.*стен|термоклип.*стен|стеклосетк.*фасад/i,
@@ -1754,6 +1804,32 @@ export async function GET(request: NextRequest) {
   }
   if (systemContextsForQuery.some(system => system.id === 'tn_roof_standart_trotuar')) {
     systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_trotuar')
+  }
+  const karkasSystemIds = [
+    'tn_roof_karkas_layt_terrasa_pm',
+    'tn_roof_karkas_layt_terrasa',
+    'tn_roof_karkas_layt_pm',
+    'tn_roof_karkas_layt',
+    'tn_roof_karkas_prof_terrasa',
+    'tn_roof_karkas_standart_terrasa',
+    'tn_roof_karkas_prof_klin',
+    'tn_roof_karkas_standart_klin',
+    'tn_roof_karkas_prof',
+    'tn_roof_karkas_standart',
+  ]
+  const genericRoofSystemIdsForKarkas = [
+    'tn_roof_terrasa',
+    'tn_roof_layt_pm',
+    'tn_roof_layt',
+    'tn_roof_prof',
+    'tn_roof_standart',
+    'tn_roof_praktik_kley',
+    'tn_roof_smart',
+  ]
+  if (systemContextsForQuery.some(system => karkasSystemIds.includes(system.id))) {
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      karkasSystemIds.includes(system.id) || !genericRoofSystemIdsForKarkas.includes(system.id)
+    )
   }
   const shouldUseRoofSmartDefaultForContext =
     (
