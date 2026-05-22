@@ -1881,7 +1881,12 @@ export async function GET(request: NextRequest) {
     {
       id: 'tn_techins_pipeline_pvc',
       name: 'ТН-ТЕХИЗОЛЯЦИЯ Трубопровод ПВХ',
-      pattern: /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|покровн.*слой.*пвх|цилиндр.*техно\s*80|цилиндр.*техно\s*120|мат.*техно.*пвх/i,
+      pattern: /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|покровн.*слой.*пвх|logicroof.*трубопровод|трубопровод.*logicroof|ecoplast.*трубопровод|трубопровод.*ecoplast|мат.*техно.*пвх/i,
+    },
+    {
+      id: 'tn_techins_pipeline',
+      name: 'ТН-ТЕХИЗОЛЯЦИЯ Трубопровод',
+      pattern: /тн[-\s]*техизол.*трубопровод(?!.*(пвх|pvc|carbon|карбон|pir|пир|подзем))|система.*теплоизоляц.*трубопровод|трубопровод.*цилиндр.*техно|цилиндр.*техно\s*(80|120).*трубопровод|трубопровод.*мат.*техно/i,
     },
     {
       id: 'tn_roof_smart',
@@ -1910,6 +1915,9 @@ export async function GET(request: NextRequest) {
     if (systemContextsForQuery.some(system => system.id === preferredId)) {
       systemContextsForQuery = systemContextsForQuery.filter(system => !suppressedIds.includes(system.id))
     }
+  }
+  if (systemContextsForQuery.some(system => system.id === 'tn_techins_pipeline_pvc')) {
+    systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_techins_pipeline')
   }
   if (systemContextsForQuery.some(system => system.id === 'tn_roof_barrier_trotuar')) {
     systemContextsForQuery = systemContextsForQuery.filter(system => system.id !== 'tn_roof_trotuar')
