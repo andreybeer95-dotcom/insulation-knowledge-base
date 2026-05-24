@@ -355,7 +355,7 @@ export async function GET(request: NextRequest) {
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
   const hasPvcMembraneQueryForNomenclature =
-    /пвх|pvc|мембран|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase/i.test(rawQuery) &&
+    /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl)\b/i.test(rawQuery) &&
     !hasCylinderQueryForNomenclature
   const pvcMembraneThicknesses = Array.from(
     rawQuery.matchAll(/(\d\s*[,\.]\s*\d|\d{1,2})\s*(?:мм|mm)?/gi)
@@ -1994,6 +1994,14 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof/i,
     },
   ].filter(system => system.pattern.test(rawQuery))
+  if (systemContextsForQuery.length === 0 && /гибк\w*\s+черепиц|битумн\w*\s+черепиц|shinglas|шинглас/i.test(rawQuery)) {
+    const isWarmPitchedRoof = /мансард|утепл\w*\s+(?:между\s+)?стропил|тепл\w*\s+контур/i.test(rawQuery)
+    systemContextsForQuery.push({
+      id: isWarmPitchedRoof ? 'tn_shinglas_mansarda' : 'tn_shinglas_klassik',
+      name: isWarmPitchedRoof ? 'ТН-ШИНГЛАС Мансарда' : 'ТН-ШИНГЛАС Классик',
+      pattern: /./,
+    })
+  }
   if (systemContextsForQuery.some(system =>
     ['tn_roof_standart_kms', 'tn_roof_standart_kv', 'tn_roof_standart_trotuar'].includes(system.id)
   )) {
