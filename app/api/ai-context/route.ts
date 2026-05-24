@@ -2362,6 +2362,12 @@ export async function GET(request: NextRequest) {
     .slice(0, 8)
 
   const dynamicSystemNamesForContext = dynamicSystemCandidatesForContext.map(candidate => candidate.name)
+  if (bestDynamicSystemScore <= 1 && dynamicSystemNamesForContext.length > 0) {
+    const exactDynamicSystemNames = new Set(dynamicSystemNamesForContext.map(normalizeSystemMatchText))
+    systemContextsForQuery = systemContextsForQuery.filter(system =>
+      exactDynamicSystemNames.has(normalizeSystemMatchText(system.name))
+    )
+  }
   const hasDynamicSystemQueryForContext = dynamicSystemNamesForContext.length > 0
   const hasAnySystemQueryForContext = hasSystemQueryForContext || hasDynamicSystemQueryForContext
 
