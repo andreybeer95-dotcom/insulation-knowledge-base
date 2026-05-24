@@ -2357,12 +2357,16 @@ export async function GET(request: NextRequest) {
     .sort((a, b) => a.score - b.score || a.name.length - b.name.length)
 
   const bestDynamicSystemScore = scoredDynamicSystemCandidatesForContext[0]?.score ?? Number.POSITIVE_INFINITY
+  const dynamicSystemScoreLimitForContext =
+    bestDynamicSystemScore <= 1 ? 1 :
+    bestDynamicSystemScore <= 2 ? 2 :
+    Math.min(bestDynamicSystemScore + 1, 4)
   const dynamicSystemCandidatesForContext = scoredDynamicSystemCandidatesForContext
-    .filter(candidate => bestDynamicSystemScore <= 1 ? candidate.score <= 1 : candidate.score <= Math.min(bestDynamicSystemScore + 1, 4))
+    .filter(candidate => candidate.score <= dynamicSystemScoreLimitForContext)
     .slice(0, 8)
 
   const dynamicSystemNamesForContext = dynamicSystemCandidatesForContext.map(candidate => candidate.name)
-  if (bestDynamicSystemScore <= 1 && dynamicSystemNamesForContext.length > 0) {
+  if (bestDynamicSystemScore <= 2 && dynamicSystemNamesForContext.length > 0) {
     const exactDynamicSystemNames = new Set(dynamicSystemNamesForContext.map(normalizeSystemMatchText))
     systemContextsForQuery = systemContextsForQuery.filter(system =>
       exactDynamicSystemNames.has(normalizeSystemMatchText(system.name))
