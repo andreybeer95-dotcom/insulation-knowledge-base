@@ -2354,16 +2354,27 @@ export async function GET(request: NextRequest) {
   )
     .map(name => ({ name, score: systemNameMatchScore(name) }))
     .filter(candidate => Number.isFinite(candidate.score))
-    .sort((a, b) => a.score - b.score || a.name.length - b.name.length)
+    .sort((a, b) => a.score - b.score || b.name.length - a.name.length)
 
   const bestDynamicSystemScore = scoredDynamicSystemCandidatesForContext[0]?.score ?? Number.POSITIVE_INFINITY
   const dynamicSystemScoreLimitForContext =
     bestDynamicSystemScore <= 1 ? 1 :
     bestDynamicSystemScore <= 2 ? 2 :
     Math.min(bestDynamicSystemScore + 1, 4)
-  const dynamicSystemCandidatesForContext = scoredDynamicSystemCandidatesForContext
+  let dynamicSystemCandidatesForContext = scoredDynamicSystemCandidatesForContext
     .filter(candidate => candidate.score <= dynamicSystemScoreLimitForContext)
     .slice(0, 8)
+
+  if (bestDynamicSystemScore <= 2) {
+    dynamicSystemCandidatesForContext = dynamicSystemCandidatesForContext.filter(candidate => {
+      const candidateText = normalizeSystemMatchText(candidate.name)
+      return !dynamicSystemCandidatesForContext.some(other => {
+        if (other === candidate || other.score > candidate.score) return false
+        const otherText = normalizeSystemMatchText(other.name)
+        return otherText.length > candidateText.length && otherText.includes(candidateText)
+      })
+    })
+  }
 
   const dynamicSystemNamesForContext = dynamicSystemCandidatesForContext.map(candidate => candidate.name)
   if (bestDynamicSystemScore <= 2 && dynamicSystemNamesForContext.length > 0) {
