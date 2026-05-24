@@ -1994,8 +1994,8 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof/i,
     },
   ].filter(system => system.pattern.test(rawQuery))
-  if (systemContextsForQuery.length === 0 && /гибк\w*\s+черепиц|битумн\w*\s+черепиц|shinglas|шинглас/i.test(rawQuery)) {
-    const isWarmPitchedRoof = /мансард|утепл\w*\s+(?:между\s+)?стропил|тепл\w*\s+контур/i.test(rawQuery)
+  if (systemContextsForQuery.length === 0 && /гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|shinglas|шинглас/i.test(rawQuery)) {
+    const isWarmPitchedRoof = /мансард|утепл[а-яё]*\s+(?:между\s+)?стропил|тепл[а-яё]*\s+контур/i.test(rawQuery)
     systemContextsForQuery.push({
       id: isWarmPitchedRoof ? 'tn_shinglas_mansarda' : 'tn_shinglas_klassik',
       name: isWarmPitchedRoof ? 'ТН-ШИНГЛАС Мансарда' : 'ТН-ШИНГЛАС Классик',
