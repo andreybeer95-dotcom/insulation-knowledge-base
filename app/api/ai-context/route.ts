@@ -2296,14 +2296,110 @@ export async function GET(request: NextRequest) {
 
   const allRules = rulesData ?? [];
 
+  const normalizeSystemMatchText = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[®™]/g, '')
+      .replace(/[^a-zа-я0-9]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const stripSystemPrefix = (value: string) =>
+    value
+      .replace(/^(ремонтная\s+система\s+)?тн\s+кровля\s+/, '')
+      .replace(/^тн\s+шинглас\s+/, '')
+      .replace(/^тн\s+стилобат\s+/, '')
+      .trim()
+
+  const extractSystemNameFromRule = (rule: any) => {
+    const match = String(rule.rule_name || '').match(/^Система\s+(.+?)(?:\s+—|$)/i)
+    return match?.[1]?.trim() || ''
+  }
+
+  const querySystemText = normalizeSystemMatchText(rawQuery)
+  const querySystemCoreText = stripSystemPrefix(querySystemText)
+  const queryLooksLikeSystemName =
+    /(тн|кровля|крыша|система|шинглас|стилобат|roof)/i.test(querySystemText)
+
+  const systemNameMatchScore = (systemName: string) => {
+    const systemText = normalizeSystemMatchText(systemName)
+    const systemCoreText = stripSystemPrefix(systemText)
+    if (!systemText || querySystemText.length < 4) return Number.POSITIVE_INFINITY
+    if (querySystemText.includes('тн кровля') && !systemText.includes('тн кровля')) return Number.POSITIVE_INFINITY
+    if (querySystemText.includes('тн стилобат') && !systemText.includes('тн стилобат')) return Number.POSITIVE_INFINITY
+    if (querySystemText.includes('тн шинглас') && !systemText.includes('тн шинглас')) return Number.POSITIVE_INFINITY
+    if (querySystemText === systemText) return 0
+    if (querySystemCoreText && querySystemCoreText === systemCoreText) return 1
+    if (querySystemText.includes(systemText)) return 2
+    if (queryLooksLikeSystemName && systemCoreText.length >= 4 && querySystemCoreText.includes(systemCoreText)) return 3
+    if (queryLooksLikeSystemName && querySystemCoreText.length >= 6 && systemCoreText.includes(querySystemCoreText)) return 4
+
+    const stopWords = new Set(['тн', 'кровля', 'крыша', 'система', 'ремонтная'])
+    const queryWords = new Set(querySystemText.split(' ').filter(Boolean))
+    const systemWords = systemText
+      .split(' ')
+      .filter(word => word.length > 2 && !stopWords.has(word))
+    if (queryLooksLikeSystemName && systemWords.length > 0 && systemWords.every(word => queryWords.has(word))) {
+      return 5
+    }
+    return Number.POSITIVE_INFINITY
+  }
+
+  const dynamicSystemCandidatesForContext = Array.from(
+    new Set(allRules.map(extractSystemNameFromRule).filter(Boolean))
+  )
+    .map(name => ({ name, score: systemNameMatchScore(name) }))
+    .filter(candidate => Number.isFinite(candidate.score))
+    .sort((a, b) => a.score - b.score || a.name.length - b.name.length)
+    .slice(0, 8)
+
+  const dynamicSystemNamesForContext = dynamicSystemCandidatesForContext.map(candidate => candidate.name)
+  const hasDynamicSystemQueryForContext = dynamicSystemNamesForContext.length > 0
+  const hasAnySystemQueryForContext = hasSystemQueryForContext || hasDynamicSystemQueryForContext
+
+  const isRuleForDynamicDetectedSystem = (rule: any) => {
+    const ruleName = String(rule.rule_name || '')
+    const systemName = extractSystemNameFromRule(rule)
+    if (systemName && dynamicSystemNamesForContext.includes(systemName)) return true
+    const haystack = normalizeSystemMatchText(
+      `${rule.category || ''} ${rule.condition || ''} ${ruleName} ${rule.rule_text || ''}`
+    )
+    return dynamicSystemNamesForContext.some(name => {
+      const normalizedName = normalizeSystemMatchText(name)
+      return normalizedName.length > 0 && haystack.includes(normalizedName)
+    })
+  }
+
+  const isRuleForAnyDetectedSystem = (rule: any) =>
+    isRuleForDetectedSystem(rule) || isRuleForDynamicDetectedSystem(rule)
+
+  const detectedAnySystemIndexForRule = (rule: any) => {
+    const detectedIndex = detectedSystemIndexForRule(rule)
+    if (detectedIndex >= 0) return detectedIndex
+    const systemName = extractSystemNameFromRule(rule)
+    if (systemName) {
+      const dynamicIndex = dynamicSystemNamesForContext.indexOf(systemName)
+      if (dynamicIndex >= 0) return systemContextsForQuery.length + dynamicIndex
+    }
+    const haystack = normalizeSystemMatchText(
+      `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`
+    )
+    const dynamicIndex = dynamicSystemNamesForContext.findIndex(name => {
+      const normalizedName = normalizeSystemMatchText(name)
+      return normalizedName.length > 0 && haystack.includes(normalizedName)
+    })
+    return dynamicIndex >= 0 ? systemContextsForQuery.length + dynamicIndex : -1
+  }
+
   // Фильтруем правила релевантные запросу
   const queryLower = query.toLowerCase();
   const ruleMatchesCurrentTopic = (rule: any) => {
     const category = String(rule.category || '').toLowerCase()
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
 
-    if (hasSystemQueryForContext) {
-      const isDetectedSystemRule = isRuleForDetectedSystem(rule)
+    if (hasAnySystemQueryForContext) {
+      const isDetectedSystemRule = isRuleForAnyDetectedSystem(rule)
       if (isDetectedSystemRule) return true
       const isGlobalGroundingRule =
         /глобально|не\s+выдум|только\s+из\s+контекст|код[ыа]?\s*1с\s+только\s+из/i.test(String(rule.rule_name || '').toLowerCase())
@@ -2353,12 +2449,12 @@ export async function GET(request: NextRequest) {
   });
 
   const sortRulesForTopic = (rules: any[]) => {
-    if (hasSystemQueryForContext) {
+    if (hasAnySystemQueryForContext) {
       return [...rules].sort((a, b) => {
         const score = (rule: any) => {
           const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
           let value = Number(rule.priority ?? 99) * 10
-          const systemIndex = detectedSystemIndexForRule(rule)
+          const systemIndex = detectedAnySystemIndexForRule(rule)
           if (systemIndex >= 0) value -= 100 - systemIndex
           if (/система/i.test(haystack)) value -= 10
           if (/расх|расч[её]т|состав|роли|аналог|огранич/i.test(haystack)) value -= 5
@@ -2489,7 +2585,7 @@ export async function GET(request: NextRequest) {
   const hasCylinderInResult = relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder')
   const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
 
-  if (queryNumbers.length === 0 && !hasSystemQueryForContext) {
+  if (queryNumbers.length === 0 && !hasAnySystemQueryForContext) {
     selection_guidance.clarification_needed = true
     if (hasConstructionInsulationQueryForContext) {
       selection_guidance.questions.push('Уточните толщину утепления и регион строительства.')
@@ -2509,7 +2605,7 @@ export async function GET(request: NextRequest) {
     ]
   }
 
-  if (relevant_nomenclature.length > 1 && !hasConstructionInsulationQueryForContext && !hasSystemQueryForContext) {
+  if (relevant_nomenclature.length > 1 && !hasConstructionInsulationQueryForContext && !hasAnySystemQueryForContext) {
     selection_guidance.clarification_needed = true
     selection_guidance.questions.push('Найдено несколько позиций одного размера. Уточните точный вариант, который нужен клиенту.')
   }
@@ -2620,7 +2716,7 @@ export async function GET(request: NextRequest) {
 
   const shortInvoiceItems = strictInvoiceMode
     ? requested_invoice_items
-    : hasSystemQueryForContext
+    : hasAnySystemQueryForContext
     ? []
     : requested_invoice_items.length > 0
     ? requested_invoice_items
@@ -2646,14 +2742,14 @@ export async function GET(request: NextRequest) {
       ]
     : []
   const shouldUseCompactResponse = compactMode || hasConstructionInsulationQueryForContext || isBareThicknessOnly
-    || hasSystemQueryForContext
+    || hasAnySystemQueryForContext
   const compactFormattedContext = [
     '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
     ...invoiceStatusLines,
     '',
     '## Основные позиции 1С',
-    ...(hasSystemQueryForContext
+    ...(hasAnySystemQueryForContext
       ? ['- Системные позиции и коды 1С переданы в rules по ролям выбранной системы.']
       : shortInvoiceItems.length > 0
       ? shortInvoiceItems.slice(0, 8).map((n) => {
@@ -2679,7 +2775,7 @@ export async function GET(request: NextRequest) {
     '## Сопутствующие',
     ...(strictInvoiceMode
       ? ['- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
-      : hasSystemQueryForContext
+      : hasAnySystemQueryForContext
       ? ['- Сопутствующие брать из состава выбранной системы в rules; не добавлять общее из поиска.']
       : nomenclature_accessories.length > 0
       ? nomenclature_accessories.slice(0, 6).map((n) => {
@@ -2736,11 +2832,11 @@ export async function GET(request: NextRequest) {
     strictRuleForTool,
     ...applicable_rules
       .filter((rule) => rule.id !== dbStrictCodeRule?.id && rule.rule_name !== strictRuleForTool.rule_name)
-      .slice(0, hasSystemQueryForContext ? 8 : 5),
+      .slice(0, hasAnySystemQueryForContext ? 8 : 5),
   ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
-  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : hasSystemQueryForContext ? [] : relevant_nomenclature
-  const accessoriesForTool = strictInvoiceMode || hasSystemQueryForContext ? [] : nomenclature_accessories
+  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : hasAnySystemQueryForContext ? [] : relevant_nomenclature
+  const accessoriesForTool = strictInvoiceMode || hasAnySystemQueryForContext ? [] : nomenclature_accessories
 
   if (toolResponseMode) {
     return NextResponse.json({
