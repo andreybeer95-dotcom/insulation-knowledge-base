@@ -2346,12 +2346,16 @@ export async function GET(request: NextRequest) {
     return Number.POSITIVE_INFINITY
   }
 
-  const dynamicSystemCandidatesForContext = Array.from(
+  const scoredDynamicSystemCandidatesForContext = Array.from(
     new Set(allRules.map(extractSystemNameFromRule).filter(Boolean))
   )
     .map(name => ({ name, score: systemNameMatchScore(name) }))
     .filter(candidate => Number.isFinite(candidate.score))
     .sort((a, b) => a.score - b.score || a.name.length - b.name.length)
+
+  const bestDynamicSystemScore = scoredDynamicSystemCandidatesForContext[0]?.score ?? Number.POSITIVE_INFINITY
+  const dynamicSystemCandidatesForContext = scoredDynamicSystemCandidatesForContext
+    .filter(candidate => bestDynamicSystemScore <= 1 ? candidate.score <= 1 : candidate.score <= Math.min(bestDynamicSystemScore + 1, 4))
     .slice(0, 8)
 
   const dynamicSystemNamesForContext = dynamicSystemCandidatesForContext.map(candidate => candidate.name)
