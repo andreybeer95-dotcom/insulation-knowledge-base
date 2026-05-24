@@ -2210,14 +2210,16 @@ export async function GET(request: NextRequest) {
   const hasBitumenRoofSystemQueryForContext = detectedSystemIdsForContext.some(systemId =>
     bitumenRoofSystemIdsForContext.has(systemId)
   )
+  const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const isRuleForDetectedSystem = (rule: any) => {
     const ruleName = String(rule.rule_name || '').toLowerCase()
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
     return systemContextsForQuery.some(system => {
       const id = system.id.toLowerCase()
       const name = system.name.toLowerCase()
+      const idPattern = new RegExp(`(^|[^a-z0-9_])${escapeRegex(id)}($|[^a-z0-9_])`)
       return (
-        haystack.includes(id) ||
+        idPattern.test(haystack) ||
         ruleName.startsWith(`система ${name} —`) ||
         ruleName === `система ${name}` ||
         haystack.includes(`system_card ${id}`) ||
@@ -2231,8 +2233,9 @@ export async function GET(request: NextRequest) {
     return systemContextsForQuery.findIndex(system => {
       const id = system.id.toLowerCase()
       const name = system.name.toLowerCase()
+      const idPattern = new RegExp(`(^|[^a-z0-9_])${escapeRegex(id)}($|[^a-z0-9_])`)
       return (
-        haystack.includes(id) ||
+        idPattern.test(haystack) ||
         ruleName.startsWith(`система ${name} —`) ||
         ruleName === `система ${name}` ||
         haystack.includes(`system_card ${id}`) ||
@@ -2365,7 +2368,7 @@ export async function GET(request: NextRequest) {
   const isRuleForDynamicDetectedSystem = (rule: any) => {
     const ruleName = String(rule.rule_name || '')
     const systemName = extractSystemNameFromRule(rule)
-    if (systemName && dynamicSystemNamesForContext.includes(systemName)) return true
+    if (systemName) return dynamicSystemNamesForContext.includes(systemName)
     const haystack = normalizeSystemMatchText(
       `${rule.category || ''} ${rule.condition || ''} ${ruleName} ${rule.rule_text || ''}`
     )
@@ -2385,6 +2388,7 @@ export async function GET(request: NextRequest) {
     if (systemName) {
       const dynamicIndex = dynamicSystemNamesForContext.indexOf(systemName)
       if (dynamicIndex >= 0) return systemContextsForQuery.length + dynamicIndex
+      return -1
     }
     const haystack = normalizeSystemMatchText(
       `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`
