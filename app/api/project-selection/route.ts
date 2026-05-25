@@ -29,10 +29,16 @@ function buildCompactSummary(estimate: any) {
   return lines.join("\n");
 }
 
+function sanitizeEstimateForSelection(estimate: any) {
+  if (!estimate || typeof estimate !== "object") return estimate;
+  const { textPreview: _textPreview, ...rest } = estimate;
+  return rest;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const estimate = body?.estimate;
+    const estimate = sanitizeEstimateForSelection(body?.estimate);
 
     if (!estimate) {
       return NextResponse.json({ ok: false, message: "estimate is required" }, { status: 400 });
