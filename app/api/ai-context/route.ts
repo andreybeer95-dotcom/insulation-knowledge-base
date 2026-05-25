@@ -378,7 +378,7 @@ export async function GET(request: NextRequest) {
       )
     )
   const pvcMembraneThicknesses = Array.from(
-    rawQuery.matchAll(/(^|[^\d])(\d\s*[,\.]\s*\d|\d{1,2})(?!\d)\s*(?:мм|mm)?(?!\s*(?:м2|м²|м\s?кв|кв\.?\s?м|m2|sq\.?\s?m))/gi)
+    rawQuery.matchAll(/(^|[^\dмm])(\d\s*[,\.]\s*\d|\d{1,2})(?!\d)\s*(?:мм|mm)?(?!\s*(?:м2|м²|м\s?кв|кв\.?\s?м|m2|sq\.?\s?m))/gi)
   )
     .map((match) => match[2].replace(/\s+/g, '').replace('.', ','))
     .filter((value) => /^(?:1,2|1,5|1,8|2,0|2)$/.test(value))
