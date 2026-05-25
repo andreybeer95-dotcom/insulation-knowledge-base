@@ -341,10 +341,15 @@ export async function GET(request: NextRequest) {
   // Extract numbers from rawQuery for product filtering
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
   const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
-  const allKeywords = [...meaningfulKeywords, ...requestedSizeNumbers]
   const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
   const hasRoofProjectQueryForNomenclature =
     /кровл|крыша|скат|плоск|металлочерепиц|гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|пвх.*мембран|мембран.*пвх|logicroof|shinglas|шинглас/i.test(rawQuery)
+  const shouldIgnoreNumericNomenclatureForRoofProject =
+    hasRoofProjectQueryForNomenclature && !hasCylinderQueryForNomenclature
+  const allKeywords = [
+    ...meaningfulKeywords,
+    ...(shouldIgnoreNumericNomenclatureForRoofProject ? [] : requestedSizeNumbers),
+  ]
   const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг/i.test(rawQuery)
   const hasMultiStoreyFacadeQueryForNomenclature =
     hasVentFacadeQueryForNomenclature &&
@@ -929,7 +934,13 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  if (queryNumbers.length > 0 && !isBareThicknessOnly && !hasRoofTermoclipQuery && !hasPipelinePvcSystemQuery) {
+  if (
+    queryNumbers.length > 0 &&
+    !isBareThicknessOnly &&
+    !hasRoofTermoclipQuery &&
+    !hasPipelinePvcSystemQuery &&
+    !shouldIgnoreNumericNomenclatureForRoofProject
+  ) {
     let nomQuery = supabase
       .from('nomenclature_1c')
       .select('id, code, article, name, brand')
