@@ -378,9 +378,9 @@ export async function GET(request: NextRequest) {
       )
     )
   const pvcMembraneThicknesses = Array.from(
-    rawQuery.matchAll(/(\d\s*[,\.]\s*\d|\d{1,2})\s*(?:мм|mm)?/gi)
+    rawQuery.matchAll(/(^|[^\d])(\d\s*[,\.]\s*\d|\d{1,2})(?!\d)\s*(?:мм|mm)?(?!\s*(?:м2|м²|м\s?кв|кв\.?\s?м|m2|sq\.?\s?m))/gi)
   )
-    .map((match) => match[1].replace(/\s+/g, '').replace('.', ','))
+    .map((match) => match[2].replace(/\s+/g, '').replace('.', ','))
     .filter((value) => /^(?:1,2|1,5|1,8|2,0|2)$/.test(value))
   const hasExplicitPvcMembraneSpec =
     pvcMembraneThicknesses.length > 0 ||
