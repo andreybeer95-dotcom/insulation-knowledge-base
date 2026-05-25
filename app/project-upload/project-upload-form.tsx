@@ -47,6 +47,12 @@ type EstimateResponse = {
   textPreview?: string;
 };
 
+type SelectionResponse = {
+  ok: boolean;
+  status?: string;
+  message?: string;
+};
+
 function sourceLabel(source?: string) {
   switch (source) {
     case "manager_input":
@@ -67,6 +73,8 @@ export default function ProjectUploadForm() {
   const [question, setQuestion] = useState("Посчитай материалы по проекту и дай коды 1С.");
   const [result, setResult] = useState<EstimateResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSendingSelection, setIsSendingSelection] = useState(false);
+  const [selectionStatus, setSelectionStatus] = useState<SelectionResponse | null>(null);
 
   const canSubmit = useMemo(() => Boolean(file) && !isLoading, [file, isLoading]);
 
@@ -81,6 +89,7 @@ export default function ProjectUploadForm() {
 
     setIsLoading(true);
     setResult(null);
+    setSelectionStatus(null);
 
     const body = new FormData();
     body.append("file", file);
@@ -102,6 +111,33 @@ export default function ProjectUploadForm() {
       });
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleSendToSelection() {
+    if (!result?.ok) return;
+
+    setIsSendingSelection(true);
+    setSelectionStatus(null);
+
+    try {
+      const response = await fetch("/api/project-selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comment: question,
+          estimate: result,
+        }),
+      });
+      const data = (await response.json()) as SelectionResponse;
+      setSelectionStatus(data);
+    } catch (error) {
+      setSelectionStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsSendingSelection(false);
     }
   }
 
@@ -201,7 +237,27 @@ export default function ProjectUploadForm() {
                     ({sourceLabel(result.area?.source)})
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleSendToSelection}
+                  disabled={isSendingSelection}
+                  className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isSendingSelection ? "Отправляю..." : "Отправить в подбор"}
+                </button>
               </div>
+
+              {selectionStatus && (
+                <div
+                  className={`rounded-md border p-3 text-sm ${
+                    selectionStatus.ok
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-amber-200 bg-amber-50 text-amber-900"
+                  }`}
+                >
+                  {selectionStatus.message ?? "Заявка обработана."}
+                </div>
+              )}
 
               {result.area?.note && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
