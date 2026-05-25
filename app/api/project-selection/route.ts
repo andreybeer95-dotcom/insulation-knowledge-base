@@ -34,6 +34,13 @@ function buildCompactSummary(estimate: any) {
     lines.push("- профильный лист: сверлоконечный саморез; бетон: остроконечный саморез + дюбель/анкер;");
     lines.push("- краевые и угловые ветровые зоны считать отдельно.");
   }
+  if (estimate?.roofDrainGuidance?.shouldMention) {
+    if (estimate.roofDrainGuidance.detectedInText) {
+      lines.push("Воронки: найдены в проекте; количество/тип сверить по проекту водоотвода или калькулятору NAV.TN.");
+    } else {
+      lines.push("Воронки: в PDF не найдены; для плоской кровли проверить водоотвод и посчитать через проект или калькулятор NAV.TN.");
+    }
+  }
   return lines.join("\n");
 }
 

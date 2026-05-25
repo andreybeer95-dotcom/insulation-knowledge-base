@@ -123,6 +123,7 @@ function detectLayers(text: string): DetectedLayer[] {
   const lower = text.toLowerCase();
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
+  const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
 
   const keramzitSlope = lower.match(/керамзит[а-я\s-]*грав[а-я\s-]*?(\d{2,3})\s*(?:\.{2,3}|-)\s*(\d{2,3})\s*мм/i);
   const keramzitAvg = keramzitSlope?.[1] && keramzitSlope?.[2]
@@ -217,6 +218,17 @@ function detectLayers(text: string): DetectedLayer[] {
       projectOnly: true,
       note: "Конструктивное основание, в номенклатурный счет кровельных материалов не ставится.",
     },
+    {
+      key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
+      role: "водоотвод/кровельная воронка",
+      label: hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
+      detected: includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
+      searchTerms: hasParapetFunnel
+        ? ["Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
+        : ["Воронка ТехноНИКОЛЬ", "Воронка кровельная", "Воронка с обжимным фланцем"],
+      quantityType: "project",
+      note: "Количество и тип воронок считать по проекту или калькулятору NAV.TN; в счет ставить только после подтверждения водосборных участков.",
+    },
   ];
 
   return layers.filter((layer) => layer.detected);
@@ -250,6 +262,33 @@ function buildRoofFastenerGuidance(text: string, question: string) {
   };
 }
 
+function buildRoofDrainGuidance(text: string, question: string, layers: DetectedLayer[]) {
+  const signalText = `${text} ${question}`.toLowerCase();
+  const detectedInText = /воронк|водосточн[а-я\s-]*воронк|внутренн[а-я\s-]*водост/i.test(text.toLowerCase());
+  const asksAboutDrains = /воронк|водосток|водоотвод|ливнев/i.test(signalText);
+  const looksLikeFlatRoof = layers.some((layer) =>
+    ["uniflex_epp", "technoelast_epp", "technoelast_ekp", "keramzit_slope", "pergamin"].includes(layer.key)
+  );
+
+  return {
+    shouldMention: asksAboutDrains || looksLikeFlatRoof,
+    detectedInText,
+    calculatorUrl: "https://nav.tn.ru/calculators/calc-funnel/",
+    source: "NAV.TN, калькулятор расчета количества кровельных воронок",
+    rules: [
+      "Количество воронок нельзя считать только по общей площади кровли: нужен водосборный участок, населенный пункт/интенсивность дождя, тип воронки и схема водоотвода.",
+      "Если воронки есть в проекте или ведомости, ставить в счет найденный тип и количество с кодом 1С.",
+      "Если в PDF воронки не найдены, для плоской кровли обязательно вынести в уточнение: проверить внутренний/парапетный водоотвод и посчитать через проект или калькулятор NAV.TN.",
+    ],
+    searchTerms: [
+      "Воронка ТехноНИКОЛЬ",
+      "Воронка парапетная ТехноНИКОЛЬ",
+      "Воронка с обжимным фланцем",
+      "Воронка ремонтная ТехноНИКОЛЬ",
+    ],
+  };
+}
+
 function buildSearchPattern(term: string) {
   return `%${term.trim().replace(/\s+/g, "%")}%`;
 }
@@ -270,6 +309,10 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
   if (layer.key === "keramzit_slope" && /20-40|20\/40/i.test(item.name ?? "")) score += 4;
+  if (layer.key.startsWith("roof_funnel") && /воронк/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "roof_funnel_parapet" && /парапет/i.test(item.name ?? "")) score += 16;
+  if (layer.key === "roof_funnel_parapet" && /квадрат/i.test(item.name ?? "")) score += 4;
+  if (layer.key === "roof_funnel" && /обжимн|прижимн|вб эко|стандарт/i.test(item.name ?? "")) score += 6;
   if (layer.key === "pergamin" && name.trim() === "пергамин") score += 18;
   if (layer.key === "pergamin" && name.includes("рубероид")) score -= 8;
   if (name.includes(requested)) score += 8;
@@ -366,6 +409,13 @@ function parsePackageVolume(name: string | null) {
 }
 
 function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureItem | null) {
+  if (layer.quantityType === "project") {
+    return {
+      value: null,
+      text: layer.note ?? "Расход по проекту.",
+    };
+  }
+
   if (!area.value) {
     return {
       value: null,
@@ -465,6 +515,7 @@ export async function POST(request: NextRequest) {
     const area = detectRoofArea(extractedText, manualArea);
     const layers = detectLayers(extractedText);
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
+    const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
 
     const invoiceItems = [];
@@ -511,6 +562,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (roofDrainGuidance.shouldMention && !roofDrainGuidance.detectedInText) {
+      notFound.push({
+        role: "водоотвод/кровельные воронки",
+        requestedLayer: "Кровельные воронки",
+        searchTerms: roofDrainGuidance.searchTerms,
+        calculation: "Количество считать по проекту водоотвода или калькулятору NAV.TN: нужен водосборный участок, населенный пункт, тип воронки и схема водоотвода.",
+        note: "В PDF воронки не найдены, но для плоской кровли этот узел нужно обязательно проверить перед счетом.",
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       fileName: file.name,
@@ -530,6 +591,7 @@ export async function POST(request: NextRequest) {
       projectOnly,
       notFound,
       roofFastenerGuidance,
+      roofDrainGuidance,
       textPreview: extractedText.slice(0, 1800),
     });
   } catch (error) {
