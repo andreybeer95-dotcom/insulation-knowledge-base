@@ -364,7 +364,7 @@ export async function GET(request: NextRequest) {
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
   const hasPipelinePvcSystemQuery =
-    /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|pipeline.*pvc|покровн.*слой.*пвх|logicroof.*трубопровод|трубопровод.*logicroof|ecoplast.*трубопровод|трубопровод.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
+    /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcMembraneQueryForNomenclature =
     /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl)\b/i.test(rawQuery) &&
     !hasCylinderQueryForNomenclature &&
@@ -382,6 +382,13 @@ export async function GET(request: NextRequest) {
   )
     .map((match) => match[1].replace(/\s+/g, '').replace('.', ','))
     .filter((value) => /^(?:1,2|1,5|1,8|2,0|2)$/.test(value))
+  const hasExplicitPvcMembraneSpec =
+    pvcMembraneThicknesses.length > 0 ||
+    /logicroof|ecoplast|ecobase|logicbase|plastfoil|пластфойл|v[-\s]*(?:rp|gr|sl|fb)\b/i.test(rawQuery)
+  const isPvcRoofProjectWithoutMainSpec =
+    hasPvcMembraneQueryForNomenclature &&
+    !hasExplicitPvcMembraneSpec &&
+    /проект|основан|деревян|балк|каркас|без\s+(?:серии|толщин)/i.test(rawQuery)
   const isBareThicknessOnly =
     queryNumbers.length === 1 &&
     /^(?:\s*(?:толщина|толщиной|утеплитель|мм|mm)\s*)*\d{2,3}\s*(?:мм|mm)?\s*$/i.test(rawQuery)
@@ -1361,7 +1368,10 @@ export async function GET(request: NextRequest) {
         ))
       : []
 
-    if (wantsAnalogForPlastfoil) {
+    if (isPvcRoofProjectWithoutMainSpec) {
+      // Для проектной ПВХ-кровли без серии/толщины не отдаём случайную мембрану как счетную позицию.
+      relevant_nomenclature = relevant_nomenclature.filter((item) => !isPvcMembraneNomenclature(item.name))
+    } else if (wantsAnalogForPlastfoil) {
       relevant_nomenclature = dedupeNomenclature([
         ...nonPlastfoilItems,
         ...relevant_nomenclature,
@@ -2226,7 +2236,7 @@ export async function GET(request: NextRequest) {
     {
       id: 'tn_techins_pipeline_pvc',
       name: 'ТН-ТЕХИЗОЛЯЦИЯ Трубопровод ПВХ',
-      pattern: /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|покровн.*слой.*пвх|logicroof.*трубопровод|трубопровод.*logicroof|ecoplast.*трубопровод|трубопровод.*ecoplast|мат.*техно.*пвх/i,
+      pattern: /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i,
     },
     {
       id: 'tn_techins_pipeline',
@@ -2944,6 +2954,11 @@ export async function GET(request: NextRequest) {
     relevant_nomenclature.slice(0, 3).some((item) => getNomenclatureItemType(item.name) === 'cylinder') ||
     nomenclature_accessories.slice(0, 2).some((item) => getNomenclatureItemType(item.name) === 'cylinder')
   const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
+
+  if (isPvcRoofProjectWithoutMainSpec) {
+    selection_guidance.clarification_needed = true
+    selection_guidance.questions.unshift('Уточните серию и толщину ПВХ-мембраны, основание и способ крепления: механика, клей или балласт.')
+  }
 
   if (queryNumbers.length === 0 && !hasAnySystemQueryForContext) {
     selection_guidance.clarification_needed = true
