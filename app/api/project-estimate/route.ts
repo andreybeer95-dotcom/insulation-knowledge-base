@@ -228,8 +228,12 @@ function buildSearchPattern(term: string) {
 
 function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   const name = (item.name ?? "").toLowerCase();
+  const brand = (item.brand ?? "").toLowerCase();
+  const requested = layer.label.toLowerCase();
   let score = 0;
   if (item.code) score += 10;
+  if (brand.includes("технониколь")) score += 4;
+  if (name.includes("технониколь")) score += 3;
   if (/технониколь|carbon|техноэласт|унифлекс/i.test(item.name ?? "")) score += 4;
   if (layer.thicknessMm && name.includes(String(layer.thicknessMm))) score += 6;
   if (layer.key.includes("epp") && /эпп/i.test(item.name ?? "")) score += 10;
@@ -238,6 +242,12 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
   if (layer.key === "keramzit_slope" && /20-40|20\/40/i.test(item.name ?? "")) score += 4;
+  if (layer.key === "pergamin" && name.trim() === "пергамин") score += 18;
+  if (layer.key === "pergamin" && name.includes("рубероид")) score -= 8;
+  if (name.includes(requested)) score += 8;
+  if (parseRollArea(item.name) !== null) score += 3;
+  if (parsePackageVolume(item.name) !== null) score += 3;
+  if (name.includes("пламя стоп")) score -= 5;
   if (/в м3|в м2|сто|пал|уп/i.test(item.name ?? "")) score += 1;
   return score;
 }
@@ -317,6 +327,16 @@ function parseRollArea(name: string | null) {
   return null;
 }
 
+function parsePackageVolume(name: string | null) {
+  if (!name) return null;
+  const matches = Array.from(name.matchAll(/(\d+(?:[,.]\d+)?)\s*(?:м3|м³)/gi));
+  if (!matches.length) return null;
+  const last = matches[matches.length - 1]?.[1];
+  if (!last) return null;
+  const value = toNumber(last);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureItem | null) {
   if (!area.value) {
     return {
@@ -339,6 +359,19 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
 
   if (layer.quantityType === "m3" && layer.thicknessMm) {
     const qty = area.value * (layer.thicknessMm / 1000) * (layer.factor ?? 1);
+    const packageVolume = parsePackageVolume(item?.name ?? null);
+    if (packageVolume !== null) {
+      return {
+        value: round(qty, 3),
+        text: `${round(qty, 3)} м3, ориентир ${Math.ceil(qty / packageVolume)} уп. по ${round(packageVolume, 4)} м3`,
+      };
+    }
+    if (layer.key === "cement_screed") {
+      return {
+        value: round(qty, 3),
+        text: `${round(qty, 3)} м3 стяжки; количество мешков считать по норме расхода ЦПС/проекту`,
+      };
+    }
     return {
       value: round(qty, 3),
       text: `${round(qty, 3)} м3 (${round(area.value * (layer.factor ?? 1), 2)} м2 x ${layer.thicknessMm} мм)`,

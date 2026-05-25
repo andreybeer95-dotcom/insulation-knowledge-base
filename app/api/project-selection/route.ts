@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
         {
           ok: false,
           status: "not_configured",
-          message: "Канал подбора пока не настроен: добавьте PROJECT_SELECTION_WEBHOOK_URL или N8N_PROJECT_SELECTION_WEBHOOK_URL.",
+          message: "Канал подбора пока не подключен. Расчет готов, используйте таблицу ниже; отправку в подбор подключим отдельным webhook.",
+          setupHint: "Set PROJECT_SELECTION_WEBHOOK_URL or N8N_PROJECT_SELECTION_WEBHOOK_URL.",
           payloadPreview: payload,
         },
         { status: 202 }
