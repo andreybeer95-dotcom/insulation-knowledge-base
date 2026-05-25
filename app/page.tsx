@@ -5,6 +5,12 @@ export default function HomePage() {
       <p className="mt-3 text-slate-700">
         Project bootstrap is complete: seed data, API routes, and admin panel.
       </p>
+      <a
+        href="/project-upload"
+        className="mt-6 inline-flex rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+      >
+        Загрузить PDF проекта
+      </a>
     </main>
   );
 }
