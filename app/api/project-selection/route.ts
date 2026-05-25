@@ -26,6 +26,14 @@ function buildCompactSummary(estimate: any) {
       lines.push(`- ${item.role}: ${item.requestedLayer}`);
     }
   }
+  if (estimate?.roofFastenerGuidance?.shouldMention) {
+    lines.push("Крепеж (если система с механическим креплением):");
+    lines.push("- поле мембраны: ориентир 6 комплектов/м2 (телескоп + саморез);");
+    lines.push("- теплоизоляция: минимум 2 крепежа/м2;");
+    lines.push("- полный предварительный ориентир: 8 крепежей/м2;");
+    lines.push("- профильный лист: сверлоконечный саморез; бетон: остроконечный саморез + дюбель/анкер;");
+    lines.push("- краевые и угловые ветровые зоны считать отдельно.");
+  }
   return lines.join("\n");
 }
 

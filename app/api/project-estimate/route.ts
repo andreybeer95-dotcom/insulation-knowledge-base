@@ -222,6 +222,32 @@ function detectLayers(text: string): DetectedLayer[] {
   return layers.filter((layer) => layer.detected);
 }
 
+function buildRoofFastenerGuidance(text: string, question: string) {
+  const signalText = `${text} ${question}`.toLowerCase();
+  const shouldMention = /креп|саморез|телескоп|termoclip|термоклип|анкер|профлист|пвх|logicroof|мембран|механическ/i.test(signalText);
+
+  return {
+    shouldMention,
+    source: "правило из консультации специалиста, 2026-05-25",
+    scope: "механическое крепление мембраны/утеплителя в кровельных системах",
+    rules: [
+      "Крепеж подбирается по общей толщине теплоизоляции и типу основания.",
+      "Комплект для мембраны: телескопический крепеж + саморез; для бетонного основания дополнительно нужен нейлоновый дюбель/анкерный элемент.",
+      "Для профлиста применяется сверлоконечный саморез; для бетона — остроконечный саморез в дюбель/анкер после засверливания.",
+      "Пример из консультации: при 150 мм утепления нужен телескопический крепеж 120 мм и саморез 70 мм.",
+      "Основное поле мембраны: ориентир 6 комплектов/м2, то есть 6 телескопов + 6 саморезов на м2.",
+      "Предварительное крепление теплоизоляции: минимум 2 крепежа/м2.",
+      "Предварительный полный ориентир для поля: 8 крепежей/м2, но не как финальный ветровой расчет.",
+      "Краевые, периметральные и угловые ветровые зоны рассчитываются отдельно и могут требовать больше крепежа.",
+    ],
+    preliminaryRates: {
+      insulationFastenersPerM2: 2,
+      membraneFieldKitsPerM2: 6,
+      totalFieldFastenersPerM2: 8,
+    },
+  };
+}
+
 function buildSearchPattern(term: string) {
   return `%${term.trim().replace(/\s+/g, "%")}%`;
 }
@@ -436,6 +462,7 @@ export async function POST(request: NextRequest) {
 
     const area = detectRoofArea(extractedText, manualArea);
     const layers = detectLayers(extractedText);
+    const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
 
     const invoiceItems = [];
@@ -500,6 +527,7 @@ export async function POST(request: NextRequest) {
       invoiceItems,
       projectOnly,
       notFound,
+      roofFastenerGuidance,
       textPreview: extractedText.slice(0, 1800),
     });
   } catch (error) {
