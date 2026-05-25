@@ -1804,6 +1804,11 @@ export async function GET(request: NextRequest) {
       pattern: /тн[-\s]*(люксард|luxard)\s*классик|(люксард|luxard).*классик|luxard.*classic/i,
     },
     {
+      id: 'project_pitched_roof_covering_choice',
+      name: 'Проектная скатная кровля — выбор покрытия',
+      pattern: /металлочерепиц[\s\S]{0,80}(?:или|\/|,)\s*(?:мягк|гибк|битумн)|(?:мягк|гибк|битумн)[\s\S]{0,80}(?:или|\/|,)\s*металлочерепиц/i,
+    },
+    {
       id: 'project_pitched_metal_tile',
       name: 'Проектная скатная кровля с металлочерепицей',
       pattern: /металлочерепиц/i,
