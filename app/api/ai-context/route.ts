@@ -171,6 +171,7 @@ export async function GET(request: NextRequest) {
     'техноакустик': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
     'технофлор': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
     'техносэндвич': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
+    'carbon': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
     'carbon prof': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
     'carbon eco': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
     'carbon solid': 'f5fc0110-8057-47fd-9811-9aa1a2e81d8b',
@@ -247,6 +248,7 @@ export async function GET(request: NextRequest) {
     'басвул': 'BASWOOL',
     'технониколь': 'ТЕХНОНИКОЛЬ',
     'technonicol': 'ТЕХНОНИКОЛЬ',
+    'carbon': 'ТЕХНОНИКОЛЬ',
     'икопал': 'ИКОПАЛ',
     'icopal': 'ИКОПАЛ',
     'k-flex': 'K-FLEX',
@@ -341,6 +343,8 @@ export async function GET(request: NextRequest) {
   const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
   const allKeywords = [...meaningfulKeywords, ...requestedSizeNumbers]
   const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+  const hasRoofProjectQueryForNomenclature =
+    /кровл|крыша|скат|плоск|металлочерепиц|гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|пвх.*мембран|мембран.*пвх|logicroof|shinglas|шинглас/i.test(rawQuery)
   const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг/i.test(rawQuery)
   const hasMultiStoreyFacadeQueryForNomenclature =
     hasVentFacadeQueryForNomenclature &&
@@ -354,9 +358,20 @@ export async function GET(request: NextRequest) {
       hasRoofWoolQueryForNomenclature ||
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
+  const hasPipelinePvcSystemQuery =
+    /тн[-\s]*техизол.*трубопровод.*пвх|трубопровод.*пвх|pipeline.*pvc|покровн.*слой.*пвх|logicroof.*трубопровод|трубопровод.*logicroof|ecoplast.*трубопровод|трубопровод.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcMembraneQueryForNomenclature =
     /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl)\b/i.test(rawQuery) &&
-    !hasCylinderQueryForNomenclature
+    !hasCylinderQueryForNomenclature &&
+    !hasPipelinePvcSystemQuery
+  const hasRoofTermoclipQuery =
+    (
+      /(termoclip|термоклип)/i.test(rawQuery) &&
+      (
+        /(?:кровл|крыша|roof|кровельн)/i.test(rawQuery) ||
+        /(?:^|\s)r\s*28\s*\/\s*(70|110)\b/i.test(rawQuery)
+      )
+    )
   const pvcMembraneThicknesses = Array.from(
     rawQuery.matchAll(/(\d\s*[,\.]\s*\d|\d{1,2})\s*(?:мм|mm)?/gi)
   )
@@ -525,6 +540,35 @@ export async function GET(request: NextRequest) {
     /xps|экструзия|экструзионн|пенопл[еэ]кс|техноплекс|carbon|ursa n|калкан/i.test(name || '') &&
     !/геомембран|мембран|геотекст|геореш[её]тк|цилиндр|rockwool|роквул/i.test(name || '')
 
+  const isPrimaryCylinderNomenclature = (name?: string | null) =>
+    getNomenclatureItemType(name) === 'cylinder' &&
+    !/заглуш|пробк|отвод|тройник|переход|сегмент|колено/i.test(name || '')
+
+  const matchesCylinderCoveringPreference = (name?: string | null) => {
+    const text = name || ''
+    if (/без\s+покрыт/i.test(rawQuery)) {
+      if (/alu1|нг\s+фольг|негорюч|(?:\balu\b|фольг)/i.test(text)) return false
+      if (!/оцинк|\bme\b|o-me-zn/i.test(rawQuery) && /оцинк|\bme\b|o-me-zn/i.test(text)) return false
+      if (!/outside/i.test(rawQuery) && /outside/i.test(text)) return false
+    }
+    return true
+  }
+
+  const isBaswoolVentFacadeNomenclature = (item: NomenclatureItem) => {
+    const text = `${item.brand || ''} ${item.name || ''}`
+    if (!/baswool/i.test(text)) return false
+    if (/руф/i.test(text)) return false
+    if (/вент\s*фасад/i.test(text)) return true
+    if (hasMultiStoreyFacadeQueryForNomenclature && /лайт[\s-]*(35|45)/i.test(text)) return true
+    return false
+  }
+
+  const isCleanXpsNomenclature = (item: NomenclatureItem) => {
+    const text = `${item.brand || ''} ${item.name || ''}`
+    if (!isXpsNomenclature(text)) return false
+    return !/baswool|rockwool|роквул|минват|минераловат/i.test(text)
+  }
+
   const hasBoardThickness = (name: string | null | undefined, thickness: string) => {
     const text = name || ''
     const patterns = [
@@ -584,9 +628,13 @@ export async function GET(request: NextRequest) {
     const result: NomenclatureItem[] = []
     for (const item of items) {
       const normalizedName = (item.name || '').replace(/\s+/g, ' ').trim().toLowerCase()
-      const key = normalizedName
-        ? `text:${normalizedName}|${item.brand || ''}`
-        : `code:${item.code || ''}|${item.article || ''}`
+      const key = item.code
+        ? `code:${item.code}`
+        : item.article
+          ? `article:${item.article}`
+          : normalizedName
+            ? `text:${normalizedName}`
+            : `id:${item.id}`
       if (seen.has(key)) continue
       seen.add(key)
       result.push(item)
@@ -881,7 +929,7 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  if (queryNumbers.length > 0 && !isBareThicknessOnly) {
+  if (queryNumbers.length > 0 && !isBareThicknessOnly && !hasRoofTermoclipQuery && !hasPipelinePvcSystemQuery) {
     let nomQuery = supabase
       .from('nomenclature_1c')
       .select('id, code, article, name, brand')
@@ -898,7 +946,10 @@ export async function GET(request: NextRequest) {
       nomQuery = nomQuery.eq('brand', nomBrand)
     }
 
-    if (requestedSizeNumbers.length >= 2) {
+    if (
+      requestedSizeNumbers.length >= 2 &&
+      !(hasRoofProjectQueryForNomenclature && !hasCylinderQueryForNomenclature)
+    ) {
       const [firstSize, secondSize] = requestedSizeNumbers
       const sizeFilters = getSizeFilters(firstSize, secondSize).join(',')
 
@@ -1130,6 +1181,62 @@ export async function GET(request: NextRequest) {
         }
         analogCandidateNomenclature = Array.from(analogById.values())
       }
+      if (isCylinderQuery) {
+        let explicitCylinderQuery = supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', '%цилиндр%')
+          .or(getSizeFilters(firstSize, secondSize).join(','))
+          .limit(300)
+
+        if (nomBrand) {
+          explicitCylinderQuery = explicitCylinderQuery.eq('brand', nomBrand)
+        }
+
+        const { data: explicitCylinderData } = await explicitCylinderQuery
+
+        const cylinderItems = dedupeNomenclature([
+          ...((explicitCylinderData ?? []) as NomenclatureItem[]),
+          ...relatedNomenclature,
+        ]).filter((item) => getNomenclatureItemType(item.name) === 'cylinder')
+
+        if (cylinderItems.length > 0) {
+          const scoreCylinderItem = (item: NomenclatureItem) => {
+            const text = `${item.article || ''} ${item.name || ''}`.toLowerCase()
+            let value = 100
+
+            if (/цилиндр/i.test(text)) value -= 40
+            if (/скорлуп/i.test(text)) value -= 20
+            if (/заглуш|пробк|отвод|тройник|переход|сегмент/i.test(text)) value += 80
+            if (/xotpipe|хотпайп/i.test(text)) value -= 15
+
+            if (/\bsp[-\s]*80\b/i.test(rawQuery) && /\bsp[-\s]*80\b/i.test(text)) value -= 15
+            if (/\bsp[-\s]*100\b/i.test(rawQuery) && /\bsp[-\s]*100\b/i.test(text)) value -= 15
+            if (/\bsp[-\s]*120\b/i.test(rawQuery) && /\bsp[-\s]*120\b/i.test(text)) value -= 15
+            if (/\bsp[-\s]*150\b/i.test(rawQuery) && /\bsp[-\s]*150\b/i.test(text)) value -= 15
+
+            if (/без\s+покрыт/i.test(rawQuery)) {
+              if (/без\s+покрыт/i.test(text)) value -= 35
+              if (/alu1|негорюч|нг\s+фольг/i.test(text)) value += 25
+              if (/\balu\b|фольг/i.test(text)) value += 20
+            }
+
+            if (/оцинк|\bme\b|o-me-zn/i.test(rawQuery) && /оцинк|\bme\b|o-me-zn/i.test(text)) value -= 20
+            if (/outside/i.test(rawQuery) && /outside/i.test(text)) value -= 20
+            if (/alu1|негорюч|нг\s+фольг/i.test(rawQuery) && /alu1|негорюч|нг\s+фольг/i.test(text)) value -= 20
+            if (/\balu\b|фольг/i.test(rawQuery) && !/alu1|негорюч|нг\s+фольг/i.test(rawQuery) && /\balu\b|фольг/i.test(text)) value -= 20
+
+            if (/\bl10\b/i.test(text)) value -= 5
+            return value
+          }
+
+          relevant_nomenclature = dedupeNomenclature([
+            ...cylinderItems.sort((a, b) => scoreCylinderItem(a) - scoreCylinderItem(b)),
+            ...relevant_nomenclature.filter((item) => getNomenclatureItemType(item.name) === 'cylinder'),
+          ]).slice(0, 12)
+        }
+      }
+
       const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
 
       nomenclature_accessories = dedupeNomenclature(accessoryCandidateNomenclature
@@ -1266,13 +1373,28 @@ export async function GET(request: NextRequest) {
       /кровл|крыша|roof|доп|сопутств|комплект|аксессуар|400|расчет|рассчитать|креп[её]ж|клей|стеклохолст|геотекст|воронк|планк|termoclip|bond/i.test(rawQuery)
 
     if (needsPvcRoofAccessoryContext) {
+      const wantsMechanicalPvcAccessories =
+        /termoclip|термоклип|механическ|креп[её]ж|профлист/i.test(rawQuery)
+      const wantsAdhesivePvcAccessories =
+        /bond|клей|клеев|osb|дерев/i.test(rawQuery)
+      const wantsBallastedPvcAccessories =
+        /балласт|грави|щебен|плитк|террас/i.test(rawQuery)
+      const wantsRoofSeparationLayerAccessories =
+        !wantsAdhesivePvcAccessories && !wantsBallastedPvcAccessories
+
       const preferredAccessoryCodes = [
-        'ЦВ000225423', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (400 м2)
-        'ЦВ000218357', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (100 м2)
-        'ЦВ000209969', // LOGICROOF BOND 10 л
-        'ЦВ000219591', // LOGICROOF BOND 5 л
-        'ЦВ000012139', // Termoclip-кровля R 28/110
-        'ЦВ000218747', // Termoclip-кровля R 28/70
+        ...(wantsRoofSeparationLayerAccessories ? [
+          'ЦВ000225423', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (400 м2)
+          'ЦВ000218357', // Стеклохолст ТехноНИКОЛЬ 100 г/м2 (100 м2)
+        ] : []),
+        ...(wantsAdhesivePvcAccessories ? [
+          'ЦВ000209969', // LOGICROOF BOND 10 л
+          'ЦВ000219591', // LOGICROOF BOND 5 л
+        ] : []),
+        ...(wantsMechanicalPvcAccessories ? [
+          'ЦВ000012139', // Termoclip-кровля R 28/110
+          'ЦВ000218747', // Termoclip-кровля R 28/70
+        ] : []),
         'ЦВ000246721', // ПВХ Металл 1x2м
         'ЦБ48182',     // ПВХ металл серый 1x2м
         'ЦВ000228797', // LOGICROOF MAST-PU
@@ -1298,6 +1420,63 @@ export async function GET(request: NextRequest) {
         ...nomenclature_accessories,
       ]).slice(0, 24)
     }
+  }
+
+  if (hasRoofTermoclipQuery) {
+    const preferredTermoclipCodes = /28\s*\/\s*110/i.test(rawQuery)
+      ? ['ЦВ000012139']
+      : /28\s*\/\s*70/i.test(rawQuery)
+        ? ['ЦВ000218747']
+        : ['ЦВ000218747', 'ЦВ000012139']
+
+    const { data: termoclipItemsByCode } = await supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .in('code', preferredTermoclipCodes)
+      .limit(12)
+
+    const { data: termoclipRelatedItems } = await supabase
+      .from('nomenclature_1c')
+      .select('id, code, article, name, brand')
+      .or([
+        'name.ilike.%Termoclip-кровля%',
+        'name.ilike.%Анкерный элемент TERMOCLIP%',
+        'name.ilike.%Телескопический крепеж TERMOCLIP%',
+        'name.ilike.%Саморез сверлоконечный TERMOCLIP%',
+      ].join(','))
+      .limit(40)
+
+    const termoclipItems = dedupeNomenclature([
+      ...((termoclipItemsByCode ?? []) as NomenclatureItem[]),
+      ...((termoclipRelatedItems ?? []) as NomenclatureItem[]),
+    ]).filter((item) =>
+      /termoclip|термоклип/i.test(item.name || '') &&
+      !/стен[аы]/i.test(item.name || '') &&
+      (
+        /кровл/i.test(item.name || '') ||
+        /анкерн/i.test(item.name || '') ||
+        /телескоп/i.test(item.name || '') ||
+        /саморез/i.test(item.name || '')
+      )
+    )
+
+    const primaryTermoclipItems = termoclipItems.filter((item) =>
+      preferredTermoclipCodes.includes(item.code || '')
+    )
+    const secondaryTermoclipItems = termoclipItems.filter((item) =>
+      !preferredTermoclipCodes.includes(item.code || '')
+    )
+
+    relevant_nomenclature = dedupeNomenclature([
+      ...primaryTermoclipItems,
+      ...secondaryTermoclipItems,
+      ...relevant_nomenclature.filter((item) => /termoclip|термоклип/i.test(item.name || '')),
+    ]).slice(0, 12)
+
+    nomenclature_accessories = dedupeNomenclature([
+      ...secondaryTermoclipItems,
+      ...nomenclature_accessories.filter((item) => /termoclip|термоклип/i.test(item.name || '')),
+    ]).slice(0, 12)
   }
 
   if (hasRoofWoolQueryForNomenclature) {
@@ -1466,7 +1645,52 @@ export async function GET(request: NextRequest) {
   }
 
   // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
+  if (hasCylinderQueryForNomenclature && !/отвод|заглуш|пробк|тройник|переход|сегмент|колено/i.test(rawQuery)) {
+    const primaryCylinderItems = relevant_nomenclature.filter((item) => isPrimaryCylinderNomenclature(item.name))
+    const displacedCylinderAccessories = relevant_nomenclature.filter((item) => !isPrimaryCylinderNomenclature(item.name))
+
+    if (primaryCylinderItems.length > 0) {
+      relevant_nomenclature = dedupeNomenclature(primaryCylinderItems).slice(0, 12)
+      nomenclature_analogs = dedupeNomenclature(
+        nomenclature_analogs.filter((item) => matchesCylinderCoveringPreference(item.name))
+      ).slice(0, 20)
+      nomenclature_accessories = dedupeNomenclature([
+        ...displacedCylinderAccessories.filter((item) =>
+          isNomenclatureAccessory(item.name) && matchesCylinderCoveringPreference(item.name)
+        ),
+        ...nomenclature_accessories.filter((item) => matchesCylinderCoveringPreference(item.name)),
+      ]).slice(0, 20)
+    }
+  }
+
+  if (hasVentFacadeQueryForNomenclature) {
+    const baswoolVentFacadeItems = relevant_nomenclature.filter(isBaswoolVentFacadeNomenclature)
+    if (baswoolVentFacadeItems.length > 0) {
+      relevant_nomenclature = dedupeNomenclature(baswoolVentFacadeItems).slice(0, 12)
+    } else {
+      relevant_nomenclature = relevant_nomenclature.filter((item) => {
+        const text = `${item.brand || ''} ${item.name || ''}`
+        return !/baswool/i.test(text) || !/руф/i.test(text)
+      })
+    }
+  }
+
+  if (/xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)) {
+    const cleanXpsItems = relevant_nomenclature.filter(isCleanXpsNomenclature)
+    if (cleanXpsItems.length > 0) {
+      relevant_nomenclature = dedupeNomenclature(cleanXpsItems).slice(0, 12)
+    }
+
+    const cleanXpsAnalogs = nomenclature_analogs.filter(isCleanXpsNomenclature)
+    if (cleanXpsAnalogs.length > 0) {
+      nomenclature_analogs = dedupeNomenclature(cleanXpsAnalogs).slice(0, 20)
+    }
+  }
+
   if (relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature)) {
+    products = []
+  }
+  if (hasPipelinePvcSystemQuery) {
     products = []
   }
   if (isBareThicknessOnly) {
@@ -1567,6 +1791,11 @@ export async function GET(request: NextRequest) {
       id: 'tn_lyuksard_klassik',
       name: 'ТН-ЛЮКСАРД Классик',
       pattern: /тн[-\s]*(люксард|luxard)\s*классик|(люксард|luxard).*классик|luxard.*classic/i,
+    },
+    {
+      id: 'project_pitched_metal_tile',
+      name: 'Проектная скатная кровля с металлочерепицей',
+      pattern: /металлочерепиц/i,
     },
     {
       id: 'tn_stilobat_ekspert_trotuar',
@@ -1991,7 +2220,7 @@ export async function GET(request: NextRequest) {
     {
       id: 'tn_roof_smart',
       name: 'ТН-КРОВЛЯ Смарт',
-      pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof/i,
+      pattern: /тн[-\s]*кровл[яья]\s*смарт(?!\s*pir)|tn[-\s]*roof[-\s]*smart|roof[-\s]*smart|профлист.*пвх.*кров|механическ.*пвх.*кров|termoclip.*logicroof|термоклип.*logicroof|termoclip.*кровл|термоклип.*кровл|кровл.*termoclip|кровл.*термоклип/i,
     },
   ].filter(system => system.pattern.test(rawQuery))
   if (systemContextsForQuery.length === 0 && /гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|shinglas|шинглас/i.test(rawQuery)) {
@@ -2194,9 +2423,11 @@ export async function GET(request: NextRequest) {
       roofTailSystemIds.includes(system.id) || !genericRoofSystemIdsForTail.includes(system.id)
     )
   }
+  const hasWoodRoofBaseForContext = /деревян|балк|osb|осп|фанер|каркас/i.test(rawQuery)
   const shouldUseRoofSmartDefaultForContext =
     (
       hasPvcMembraneQueryForContext &&
+      !hasWoodRoofBaseForContext &&
       /кровл|крыш|профлист|профилирован|механическ|termoclip|термоклип|стеклохолст|расч[её]т|рассчитать|\d+\s*(м2|м²|м\s?кв|кв\.?\s?м)/i.test(rawQuery)
     )
   if (shouldUseRoofSmartDefaultForContext && systemContextsForQuery.length === 0) {
@@ -2206,6 +2437,25 @@ export async function GET(request: NextRequest) {
       pattern: /./,
     })
   }
+  const hasExplicitSystemIntentForContext =
+    /(тн[-\s]|tn[-\s]|\bсистема\b|system_card|roof[-\s]*smart|кровл[ья]\s*смарт|termoclip|термоклип|техизол.*трубопровод|pipeline|проектн.*металлочерепиц|шинглас|stylobat|стилобат)/i.test(rawQuery)
+  const allowImplicitSystemContext =
+    hasExplicitSystemIntentForContext ||
+    hasPipelinePvcSystemQuery ||
+    hasRoofTermoclipQuery ||
+    /металлочерепиц|шинглас|stylobat|стилобат/i.test(rawQuery)
+  const shouldSuppressImplicitSystemContext =
+    !allowImplicitSystemContext &&
+    (
+      hasCylinderQueryForContext ||
+      hasXpsQueryForContext ||
+      hasPvcMembraneQueryForContext
+    )
+
+  if (shouldSuppressImplicitSystemContext) {
+    systemContextsForQuery = []
+  }
+
   const detectedSystemIdsForContext = [...new Set(systemContextsForQuery.map(system => system.id))]
   const hasSystemQueryForContext = detectedSystemIdsForContext.length > 0
   const hasRoofSmartSystemQueryForContext = detectedSystemIdsForContext.includes('tn_roof_smart')
@@ -2373,6 +2623,10 @@ export async function GET(request: NextRequest) {
     .filter(candidate => candidate.score <= dynamicSystemScoreLimitForContext)
     .slice(0, 8)
 
+  if (shouldSuppressImplicitSystemContext) {
+    dynamicSystemCandidatesForContext = []
+  }
+
   if (bestDynamicSystemScore <= 2) {
     dynamicSystemCandidatesForContext = dynamicSystemCandidatesForContext.filter(candidate => {
       const candidateText = normalizeSystemMatchText(candidate.name)
@@ -2463,15 +2717,24 @@ export async function GET(request: NextRequest) {
       return ['общестрой', 'теплоизоляция', ''].includes(category)
     }
     if (hasPvcMembraneQueryForContext) {
+      if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
+        return false
+      }
       return ['кровельные мембраны', 'гидроизоляция', ''].includes(category)
     }
     if (hasGeotextileQueryForContext) {
       return ['геосинтетика', ''].includes(category)
     }
     if (hasXpsQueryForContext) {
+      if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
+        return false
+      }
       return ['теплоизоляция', 'гидроизоляция', 'общестрой', ''].includes(category)
     }
     if (hasCylinderQueryForContext) {
+      if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
+        return false
+      }
       return ['цилиндры', 'теплоизоляция', ''].includes(category)
     }
     return true
@@ -2618,6 +2881,31 @@ export async function GET(request: NextRequest) {
     selection_guidance.recommendation_status = 'nav_tn_system_context'
   }
 
+  if (hasAnySystemQueryForContext && !strictInvoiceMode) {
+    const hasAreaInSystemQuery = /\d+\s*(м2|м²|м\s?кв|кв\.?\s?м)/i.test(rawQuery)
+    const hasBaseInSystemQuery = /профлист|профилирован|бетон|ж\/б|цсп|osb|осп|фанер|дерев|трубопровод|труба|основан/i.test(rawQuery)
+    const hasMountingModeInSystemQuery = /механическ|termoclip|термоклип|клей|клеев|bond|балласт|наплавл|самокле/i.test(rawQuery)
+    const needsRoofMembraneMountingQuestion =
+      !hasPipelinePvcSystemQuery &&
+      (
+        hasPvcMembraneQueryForContext ||
+        /termoclip|термоклип/i.test(rawQuery)
+      )
+
+    if (!hasAreaInSystemQuery) {
+      selection_guidance.questions.push('Уточните площадь/объем проекта: без этого нельзя корректно посчитать комплект и расходные позиции.')
+    }
+    if (!hasBaseInSystemQuery) {
+      selection_guidance.questions.push('Уточните основание и узел применения: профлист, бетон, дерево/OSB, трубопровод или другой вариант.')
+    }
+    if (
+      needsRoofMembraneMountingQuestion &&
+      !hasMountingModeInSystemQuery
+    ) {
+      selection_guidance.questions.push('Уточните схему монтажа: механика, клей или балласт. Без этого нельзя правильно рекомендовать крепеж и сопутствующие.')
+    }
+  }
+
   if (strictInvoiceMode) {
     selection_guidance.answer_policy = [
       'Если missing_items не пустой, запрещено писать "все позиции найдены". Писать: "найдено X из Y, проверить: ...".',
@@ -2636,6 +2924,9 @@ export async function GET(request: NextRequest) {
 
   const hasUseCaseInQuery = /улиц|помещ|труб|отопл|хвс|гвс|вент|котельн|наруж|внутр|оцинк|фольг|нг|дренаж|дорог|откос|склон|асфальт|фундамент|кровл|фасад/i.test(rawQuery)
   const hasCylinderInResult = relevant_nomenclature.some((item) => getNomenclatureItemType(item.name) === 'cylinder')
+  const hasPrimaryCylinderInResult =
+    relevant_nomenclature.slice(0, 3).some((item) => getNomenclatureItemType(item.name) === 'cylinder') ||
+    nomenclature_accessories.slice(0, 2).some((item) => getNomenclatureItemType(item.name) === 'cylinder')
   const hasGeotextileInQuery = /геотекст|дорнит|геоткан/i.test(rawQuery)
 
   if (queryNumbers.length === 0 && !hasAnySystemQueryForContext) {
@@ -2663,7 +2954,7 @@ export async function GET(request: NextRequest) {
     selection_guidance.questions.push('Найдено несколько позиций одного размера. Уточните точный вариант, который нужен клиенту.')
   }
 
-  if (hasCylinderInResult) {
+  if (hasCylinderQueryForContext || hasPrimaryCylinderInResult) {
     if (!/alu|alu1|фольг|оцинк|me|outside|без покрыт|нг/i.test(rawQuery)) {
       selection_guidance.clarification_needed = true
       selection_guidance.questions.push('Для цилиндров уточните покрытие: без покрытия, Alu, Alu1/НГ, ME/оцинковка или Outside.')
@@ -2693,9 +2984,10 @@ export async function GET(request: NextRequest) {
     if (!/мембран|нг|ветрозащит/i.test(rawQuery)) {
       selection_guidance.questions.push('Проверьте по проекту, нужна ли НГ/ветрозащитная мембрана.')
     }
-    selection_guidance.questions = Array.from(new Set(selection_guidance.questions)).slice(0, 3)
-    selection_guidance.clarification_needed = selection_guidance.questions.length > 0
   }
+
+  selection_guidance.questions = Array.from(new Set(selection_guidance.questions)).slice(0, 3)
+  selection_guidance.clarification_needed = selection_guidance.questions.length > 0
 
   let formattedContext = buildContext(
     query,
