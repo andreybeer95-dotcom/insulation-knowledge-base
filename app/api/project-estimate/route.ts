@@ -135,7 +135,7 @@ function detectLayers(text: string): DetectedLayer[] {
       role: "грунтовка основания",
       label: "Праймер №08",
       detected: includesAny(lower, [/праймер\s*(?:№|n)?\s*0?8/i, /грунтовка\s+праймер/i]),
-      searchTerms: ["Праймер №08", "Праймер 08", "Праймер ТЕХНОНИКОЛЬ 08"],
+      searchTerms: ["Праймер 08", "Праймер ТЕХНОНИКОЛЬ 08", "Праймер №08"],
       quantityType: "project",
       note: "Расход праймера зависит от основания; в счет ставить после проверки нормы проекта.",
     },
@@ -246,6 +246,7 @@ async function findNomenclature(layer: DetectedLayer) {
   if (!layer.searchTerms.length || layer.projectOnly) return [];
   const supabase = getServiceSupabase();
   const found = new Map<string, NomenclatureItem>();
+  let hadSupabaseError = false;
 
   for (const term of layer.searchTerms) {
     const { data, error } = await supabase
@@ -255,8 +256,9 @@ async function findNomenclature(layer: DetectedLayer) {
       .limit(10);
 
     if (error) {
-      console.warn("Supabase nomenclature search failed, using local fallback:", errorMessage(error));
-      return findLocalNomenclature(layer);
+      hadSupabaseError = true;
+      console.warn(`Supabase nomenclature search failed for "${term}":`, errorMessage(error));
+      continue;
     }
     for (const item of (data ?? []) as NomenclatureItem[]) {
       const key = `${item.code ?? ""}:${item.name ?? ""}`;
@@ -264,9 +266,21 @@ async function findNomenclature(layer: DetectedLayer) {
     }
   }
 
-  return Array.from(found.values())
+  const supabaseResult = Array.from(found.values())
     .sort((a, b) => itemScore(b, layer) - itemScore(a, layer))
     .slice(0, 3);
+
+  if (supabaseResult.length) return supabaseResult;
+
+  if (hadSupabaseError) {
+    try {
+      return await findLocalNomenclature(layer);
+    } catch (error) {
+      console.warn("Local nomenclature fallback is unavailable:", errorMessage(error));
+    }
+  }
+
+  return [];
 }
 
 async function loadLocalNomenclature() {
