@@ -224,7 +224,7 @@ function detectLayers(text: string): DetectedLayer[] {
 
 function buildRoofFastenerGuidance(text: string, question: string) {
   const signalText = `${text} ${question}`.toLowerCase();
-  const shouldMention = /креп|саморез|телескоп|termoclip|термоклип|анкер|профлист|пвх|logicroof|мембран|механическ/i.test(signalText);
+  const shouldMention = /креп[её]ж|саморез|телескоп|termoclip|термоклип|анкер|профлист|пвх|logicroof|мембран|механическ/i.test(signalText);
 
   return {
     shouldMention,
