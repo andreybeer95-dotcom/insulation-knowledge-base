@@ -552,8 +552,9 @@ export async function POST(request: NextRequest) {
       const matches = await findNomenclature(layer);
       const primary = matches[0] ?? null;
       const quantity = buildQuantity(layer, area, primary);
+      const requiresProjectQuantity = layer.key.startsWith("roof_funnel") && !layer.unitCount;
 
-      if (primary?.code) {
+      if (primary?.code && !requiresProjectQuantity) {
         invoiceItems.push({
           role: layer.role,
           material: primary.name,
@@ -574,7 +575,9 @@ export async function POST(request: NextRequest) {
           requestedLayer: layer.label,
           searchTerms: layer.searchTerms,
           calculation: quantity.text,
-          note: "Код 1С не найден автоматически; в счет без ручной проверки не ставить.",
+          note: requiresProjectQuantity
+            ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
+            : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.",
         });
       }
     }
