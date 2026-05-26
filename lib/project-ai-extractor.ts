@@ -53,7 +53,7 @@ function getProvider(): ProjectAiProvider | null {
 
 function getModel(provider: ProjectAiProvider) {
   if (process.env.PROJECT_AI_MODEL) return process.env.PROJECT_AI_MODEL;
-  if (provider === "anthropic") return "claude-3-5-haiku-20241022";
+  if (provider === "anthropic") return "claude-3-haiku-20240307";
   if (provider === "openrouter") return "openai/gpt-4o-mini";
   return "gpt-4o-mini";
 }
