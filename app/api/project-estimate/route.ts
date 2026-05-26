@@ -300,6 +300,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       factor: 1.15,
       areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
       quantityType: "m2",
+      thicknessMm: pvcMembraneThicknessMm,
       note: pvcMembraneThicknessMm
         ? "Марку и толщину мембраны сверить по проекту перед КП."
         : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
@@ -581,7 +582,13 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("ekp") && /экп/i.test(item.name ?? "")) score += 10;
   if (layer.key === "primer_08" && /0?8|№08|n08/i.test(item.name ?? "")) score += 12;
   if (layer.key === "pvc_logicroof_vrp" && /logicroof/i.test(item.name ?? "") && /v-rp/i.test(item.name ?? "")) score += 16;
-  if (layer.key === "pvc_logicroof_vrp" && layer.thicknessMm && name.includes(String(layer.thicknessMm).replace(".", ","))) score += 8;
+  if (layer.key === "pvc_logicroof_vrp" && layer.thicknessMm) {
+    const desiredThickness = String(layer.thicknessMm).replace(".", "[,.]");
+    const hasDesiredThickness = new RegExp(`${desiredThickness}\\s*(?:мм|mm)?`).test(name);
+    const itemThickness = name.match(/(?:^|\s)(1[,.][258]|2[,.]0)\s*(?:мм|mm)?/i)?.[1]?.replace(",", ".");
+    if (hasDesiredThickness) score += 30;
+    if (itemThickness && itemThickness !== String(layer.thicknessMm)) score -= 20;
+  }
   if (layer.key === "pvc_logicroof_vrp" && /arctic|arctiс/i.test(item.name ?? "") && !/arctic|arctiс/i.test(requested)) score -= 20;
   if (layer.key === "pvc_logicroof_vrp" && /2[,.]10\s*[xх]\s*20/i.test(item.name ?? "")) score += 4;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
