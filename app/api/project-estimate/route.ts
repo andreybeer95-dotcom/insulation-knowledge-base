@@ -3,6 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getServiceSupabase } from "@/lib/server-supabase";
+import {
+  extractRoofProjectWithAi,
+  getProjectAiExtractorMode,
+  hasProjectAiExtractorConfig,
+  type ProjectAiExtraction,
+  type ProjectAiLayer,
+} from "@/lib/project-ai-extractor";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -508,6 +515,279 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   return layers.filter((layer) => layer.detected);
 }
 
+function shouldRunAiExtraction(input: {
+  direction: string;
+  question: string;
+  area: AreaInfo;
+  layers: DetectedLayer[];
+}) {
+  const mode = getProjectAiExtractorMode();
+  if (mode === "off") return false;
+  if (!hasProjectAiExtractorConfig()) return false;
+  if (!/кров|roof/i.test(input.direction)) return false;
+  if (mode === "always") return true;
+
+  const questionAsksAi = /(^|\s)(ai|ии)(\s|$)|прочитай|распознай|извлеки/i.test(input.question);
+  const weakArea = input.area.source === "not_found" || input.area.source === "axes_estimate" || input.area.confidence === "low";
+  const weakLayers = input.layers.length < 2;
+  const onlyProjectLayers = input.layers.length > 0 && input.layers.every((layer) => layer.projectOnly);
+  const missingPvcThickness = input.layers.some((layer) => layer.key === "pvc_logicroof_vrp" && !layer.thicknessMm);
+
+  return questionAsksAi || weakArea || weakLayers || onlyProjectLayers || missingPvcThickness;
+}
+
+function parseAiThickness(text: string) {
+  const match = text.match(/(\d{1,3}(?:[,.]\d)?)\s*(?:мм|mm)/i);
+  return match?.[1] ? toNumber(match[1]) : undefined;
+}
+
+function aiLayerArea(layer: ProjectAiLayer) {
+  if (!layer.areaM2 || layer.areaM2 <= 0) return undefined;
+  const explicitLayerCount = layer.layerCount && layer.layerCount > 1 ? layer.layerCount : undefined;
+  const text = `${layer.role ?? ""} ${layer.material ?? ""} ${layer.note ?? ""}`.toLowerCase();
+  const inferredLayerCount = explicitLayerCount ?? (/2\s*сло/i.test(text) ? 2 : 1);
+  return round(layer.areaM2 * inferredLayerCount, 2);
+}
+
+function aiLayerNote(layer: ProjectAiLayer) {
+  const source = layer.sourceText ? ` Фрагмент: ${layer.sourceText}` : "";
+  const note = layer.note ? ` ${layer.note}` : "";
+  return `Найдено AI-экстрактором проекта; перед КП сверить по PDF.${note}${source}`;
+}
+
+function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[] {
+  if (extraction.status !== "ok") return [];
+
+  return extraction.layers.map((layer, index): DetectedLayer | null => {
+    const material = layer.material?.trim() || "";
+    const role = layer.role?.trim() || "материал из проекта";
+    const text = `${role} ${material} ${layer.note ?? ""}`.toLowerCase();
+    const thicknessMm = layer.thicknessMm ?? parseAiThickness(text);
+    const areaOverride = aiLayerArea(layer);
+    const note = aiLayerNote(layer);
+    const isProjectOnly = Boolean(layer.projectOnly);
+    const unitCount = (layer.unit === "шт" || layer.quantityType === "шт") && layer.quantity ? layer.quantity : undefined;
+
+    if (/logicroof\s+v-rp|пвх[а-я\s-]*мембран/.test(text)) {
+      return {
+        key: "pvc_logicroof_vrp",
+        role: "кровельная ПВХ-мембрана",
+        label: thicknessMm ? `LOGICROOF V-RP ${thicknessMm} мм` : material || "LOGICROOF V-RP",
+        detected: true,
+        searchTerms: thicknessMm
+          ? [`Logicroof V-RP ${String(thicknessMm).replace(".", ",")}`, `Logicroof V-RP ${thicknessMm}`, "ПВХ Logicroof V-RP"]
+          : ["ПВХ Logicroof V-RP", "Logicroof V-RP"],
+        factor: 1.15,
+        thicknessMm,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/logicpir\s+slope/.test(text)) {
+      return {
+        key: `ai_logicpir_slope_${index}`,
+        role: "уклонообразующий слой LOGICPIR SLOPE",
+        label: material || "LOGICPIR SLOPE",
+        detected: true,
+        searchTerms: [],
+        quantityType: "project",
+        projectOnly: true,
+        note: "Количество клиновидных плит LOGICPIR SLOPE считать по плану уклонов/раскладке элементов, не по общей площади.",
+      };
+    }
+
+    if (/logicpir\s+prof/.test(text)) {
+      return {
+        key: `ai_logicpir_prof_${thicknessMm ?? "unknown"}_${index}`,
+        role: role.includes("тепло") ? role : "теплоизоляция LOGICPIR",
+        label: thicknessMm ? `LOGICPIR PROF Ф/Ф ${thicknessMm} мм` : material || "LOGICPIR PROF",
+        detected: true,
+        searchTerms: thicknessMm
+          ? [`LOGICPIR PROF Ф/Ф ${thicknessMm}`, `LOGICPIR PROF ${thicknessMm}`, material].filter(Boolean)
+          : ["LOGICPIR PROF Ф/Ф", "LOGICPIR PROF", material].filter(Boolean),
+        factor: 1.03,
+        thicknessMm,
+        areaOverride,
+        quantityType: thicknessMm ? "m3" : "m2",
+        note,
+      };
+    }
+
+    if (/технор[уо]ф/.test(text)) {
+      const searchBase = material || role;
+      return {
+        key: `ai_technoruf_${thicknessMm ?? "unknown"}_${index}`,
+        role: role.includes("тепло") ? role : "теплоизоляция кровли",
+        label: thicknessMm ? `${material || "ТЕХНОРУФ"} ${thicknessMm} мм` : material || "ТЕХНОРУФ",
+        detected: true,
+        searchTerms: thicknessMm
+          ? [`${searchBase} ${thicknessMm}`, `ТЕХНОРУФ ${thicknessMm}`, searchBase].filter(Boolean)
+          : [searchBase, "ТЕХНОРУФ"].filter(Boolean),
+        factor: 1.03,
+        thicknessMm,
+        areaOverride,
+        quantityType: thicknessMm ? "m3" : "m2",
+        note,
+      };
+    }
+
+    if (/технобарьер|паробарьер/.test(text)) {
+      return {
+        key: "technobarrier",
+        role: "пароизоляция",
+        label: material || "ТЕХНОБАРЬЕР / Паробарьер",
+        detected: true,
+        searchTerms: ["ТЕХНОБАРЬЕР", "Паробарьер C", "Паробарьер", material].filter(Boolean),
+        factor: 1.12,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/унифлекс\s+эпп/.test(text)) {
+      return {
+        key: "uniflex_epp",
+        role: "пароизоляция",
+        label: "Унифлекс ЭПП",
+        detected: true,
+        searchTerms: ["Унифлекс ЭПП"],
+        factor: 1.15,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/техноэласт\s+эпп/.test(text)) {
+      return {
+        key: "technoelast_epp",
+        role: "нижний слой кровельного ковра",
+        label: "Техноэласт ЭПП",
+        detected: true,
+        searchTerms: ["Техноэласт ЭПП"],
+        factor: 1.15,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/техноэласт\s+экп/.test(text)) {
+      return {
+        key: "technoelast_ekp",
+        role: "верхний слой кровельного ковра",
+        label: "Техноэласт ЭКП",
+        detected: true,
+        searchTerms: ["Техноэласт ЭКП"],
+        factor: 1.15,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/пергамин/.test(text)) {
+      return {
+        key: "pergamin",
+        role: "разделительный слой",
+        label: "Пергамин",
+        detected: true,
+        searchTerms: ["Пергамин"],
+        factor: 1.15,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
+    if (/праймер|грунтовк/.test(text)) {
+      return {
+        key: "primer_08",
+        role: "грунтовка основания",
+        label: /0?8|№08|n08/i.test(text) ? "Праймер №08" : material || "Праймер",
+        detected: true,
+        searchTerms: ["Праймер 08", "Праймер ТЕХНОНИКОЛЬ 08", material].filter(Boolean),
+        quantityType: "project",
+        note,
+      };
+    }
+
+    if (/xps|эппс|carbon|экструдированн[а-я\s-]*пенополистирол/.test(text)) {
+      return {
+        key: `ai_xps_${thicknessMm ?? "unknown"}_${index}`,
+        role: "теплоизоляция",
+        label: thicknessMm ? `${material || "XPS"} ${thicknessMm} мм` : material || "XPS",
+        detected: true,
+        searchTerms: thicknessMm
+          ? [`CARBON ECO ${thicknessMm}`, `CARBON PROF ${thicknessMm}`, `XPS ${thicknessMm}`, material].filter(Boolean)
+          : ["CARBON ECO", "CARBON PROF", "XPS", material].filter(Boolean),
+        factor: 1.03,
+        thicknessMm,
+        areaOverride,
+        quantityType: thicknessMm ? "m3" : "m2",
+        note,
+      };
+    }
+
+    if (/воронк/.test(text)) {
+      const isParapet = /парапет/.test(text);
+      return {
+        key: isParapet ? `roof_funnel_parapet_ai_${index}` : `roof_funnel_ai_${index}`,
+        role: isParapet ? "водоотвод/парапетная воронка" : "водоотвод/кровельная воронка",
+        label: material || (isParapet ? "Воронка парапетная" : "Воронка кровельная"),
+        detected: true,
+        searchTerms: isParapet
+          ? ["Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная", material].filter(Boolean)
+          : ["Воронка ТехноНИКОЛЬ", "Воронка кровельная", material].filter(Boolean),
+        quantityType: "project",
+        unitCount,
+        note,
+      };
+    }
+
+    if (isProjectOnly || /logicpir\s+slope|сэндвич|сендвич|профлист|основан|ж\/?б|водосточн[а-я\s-]*желоб|наружн[а-я\s-]*водосток/.test(text)) {
+      return {
+        key: `ai_project_only_${index}`,
+        role,
+        label: material || role,
+        detected: true,
+        searchTerms: [],
+        quantityType: "project",
+        projectOnly: true,
+        note,
+      };
+    }
+
+    return null;
+  }).filter((layer): layer is DetectedLayer => layer !== null);
+}
+
+function mergeDetectedLayers(baseLayers: DetectedLayer[], aiLayers: DetectedLayer[]) {
+  const merged = new Map<string, DetectedLayer>();
+  for (const layer of baseLayers) merged.set(layer.key, layer);
+  for (const aiLayer of aiLayers) {
+    const existing = merged.get(aiLayer.key);
+    if (!existing) {
+      merged.set(aiLayer.key, aiLayer);
+      continue;
+    }
+
+    merged.set(aiLayer.key, {
+      ...existing,
+      label: existing.thicknessMm ? existing.label : aiLayer.label || existing.label,
+      searchTerms: existing.searchTerms.length ? existing.searchTerms : aiLayer.searchTerms,
+      thicknessMm: existing.thicknessMm ?? aiLayer.thicknessMm,
+      areaOverride: existing.areaOverride ?? aiLayer.areaOverride,
+      unitCount: existing.unitCount ?? aiLayer.unitCount,
+      note: existing.note ?? aiLayer.note,
+    });
+  }
+  return Array.from(merged.values());
+}
+
 function buildRoofFastenerGuidance(text: string, question: string) {
   const signalText = `${text} ${question}`.toLowerCase();
   const asksAboutFasteners = /креп[её]ж|саморез|телескоп|termoclip|термоклип|анкер/i.test(signalText);
@@ -898,8 +1178,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const area = detectRoofArea(extractedText, manualArea);
-    const layers = detectLayers(extractedText, question);
+    let area = detectRoofArea(extractedText, manualArea);
+    let layers = detectLayers(extractedText, question);
+    const shouldRunAi = shouldRunAiExtraction({ direction, question, area, layers });
+    const aiExtraction = await extractRoofProjectWithAi({
+      text: extractedText,
+      question,
+      direction,
+      shouldRun: shouldRunAi,
+    });
+
+    if (aiExtraction.status === "ok") {
+      const aiLayers = buildAiDetectedLayers(aiExtraction);
+      layers = mergeDetectedLayers(layers, aiLayers);
+
+      if (
+        aiExtraction.roofAreaM2 &&
+        aiExtraction.roofAreaM2 > 0 &&
+        aiExtraction.roofAreaConfidence !== "none" &&
+        (area.source === "not_found" || area.source === "axes_estimate" || area.confidence === "low")
+      ) {
+        area = {
+          value: round(aiExtraction.roofAreaM2, 2),
+          source: "pdf_text",
+          confidence: aiExtraction.roofAreaConfidence === "high" ? "high" : "medium",
+          note: `Площадь кровли извлечена AI-экстрактором из PDF. ${aiExtraction.roofAreaSource ?? "Перед счетом сверить с ведомостью/планом кровли."}`,
+        };
+      }
+    }
+
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
     const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
@@ -990,8 +1297,11 @@ export async function POST(request: NextRequest) {
         role: layer.role,
         material: layer.label,
         quantityType: layer.quantityType,
+        areaOverride: layer.areaOverride ?? null,
+        unitCount: layer.unitCount ?? null,
         note: layer.note ?? null,
       })),
+      aiExtraction,
       invoiceItems,
       quoteItems,
       quoteDraft,

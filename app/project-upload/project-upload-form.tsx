@@ -20,8 +20,19 @@ type EstimateResponse = {
     role: string;
     material: string;
     quantityType: string;
+    areaOverride?: number | null;
+    unitCount?: number | null;
     note: string | null;
   }>;
+  aiExtraction?: {
+    status: "disabled" | "skipped" | "failed" | "ok";
+    reason?: string;
+    provider?: string;
+    model?: string;
+    roofAreaM2?: number | null;
+    layers?: Array<unknown>;
+    warnings?: string[];
+  };
   invoiceItems?: Array<{
     role: string;
     material: string;
@@ -75,6 +86,16 @@ function sourceLabel(source?: string) {
     default:
       return "не найдена";
   }
+}
+
+function aiStatusLabel(ai?: EstimateResponse["aiExtraction"]) {
+  if (!ai) return null;
+  if (ai.status === "ok") {
+    return `AI-экстрактор использован: ${ai.layers?.length ?? 0} слоёв${ai.roofAreaM2 ? `, площадь ${ai.roofAreaM2} м2` : ""}.`;
+  }
+  if (ai.status === "skipped") return "AI-экстрактор не запускался: обычный парсер дал достаточный результат.";
+  if (ai.status === "disabled") return "AI-экстрактор не подключён: нет ключа/провайдера в окружении.";
+  return `AI-экстрактор не сработал: ${ai.reason ?? "ошибка модели"}.`;
 }
 
 export default function ProjectUploadForm() {
@@ -298,6 +319,20 @@ export default function ProjectUploadForm() {
               {result.area?.note && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                   {result.area.note}
+                </div>
+              )}
+
+              {result.aiExtraction && (
+                <div
+                  className={`rounded-md border p-3 text-sm ${
+                    result.aiExtraction.status === "ok"
+                      ? "border-blue-200 bg-blue-50 text-blue-900"
+                      : result.aiExtraction.status === "failed"
+                        ? "border-amber-200 bg-amber-50 text-amber-900"
+                        : "border-slate-200 bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  {aiStatusLabel(result.aiExtraction)}
                 </div>
               )}
 
