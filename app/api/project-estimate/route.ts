@@ -157,6 +157,15 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
+  const pvcMembraneThicknessMatch = lower.match(/(?:logicroof\s+v-rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
+  const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
+  const roofWoolThicknessMatch = lower.match(/(?:минераловатн[а-я\s-]*утеплител|минват[а-я\s-]*утеплител|утеплител[а-я\s-]*минераловатн)[^\d]{0,60}(?:t\s*=\s*)?(\d{2,3})\s*мм/i);
+  const roofWoolThicknessMm = roofWoolThicknessMatch?.[1] ? Number(roofWoolThicknessMatch[1]) : undefined;
+  const hasExternalRoofDrainage = includesAny(lower, [
+    /наружн[а-я\s-]*организованн[а-я\s-]*водосток/i,
+    /водосточн[а-я\s-]*желоб/i,
+    /водосборн[а-я\s-]*воронк/i,
+  ]);
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
   const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
   const funnelUnitCount = detectUnitCount(lower, /воронк[а-я]*/);
@@ -167,6 +176,33 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     : undefined;
 
   const layers: DetectedLayer[] = [
+    {
+      key: "pvc_logicroof_vrp",
+      role: "кровельная ПВХ-мембрана",
+      label: pvcMembraneThicknessMm ? `LOGICROOF V-RP ${pvcMembraneThicknessMm} мм` : "LOGICROOF V-RP",
+      detected: includesAny(lower, [/logicroof\s+v-rp/i, /полимерн[а-я\s-]*мембран[а-я\s-]*logicroof/i]),
+      searchTerms: pvcMembraneThicknessMm
+        ? [`Logicroof V-RP ${String(pvcMembraneThicknessMm).replace(".", ",")}`, `Logicroof V-RP ${pvcMembraneThicknessMm}`, "ПВХ Logicroof V-RP"]
+        : [],
+      factor: 1.15,
+      quantityType: "m2",
+      note: pvcMembraneThicknessMm
+        ? "Марку и толщину мембраны сверить по проекту перед КП."
+        : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
+    },
+    {
+      key: "roof_mw",
+      role: "теплоизоляция кровли",
+      label: roofWoolThicknessMm ? `Минераловатный утеплитель кровли ${roofWoolThicknessMm} мм` : "Минераловатный утеплитель кровли",
+      detected: includesAny(lower, [/кровл[а-я\s-]*мембран[а-я\s-]*по\s+профлист[а-я\s-]*с\s+минераловатн[а-я\s-]*утеплител/i, /минераловатн[а-я\s-]*утеплител[а-я\s-]*(?:t\s*=\s*)?\d{2,3}\s*мм/i]),
+      searchTerms: roofWoolThicknessMm
+        ? [`ТЕХНОРУФ Н ПРОФ ${roofWoolThicknessMm}`, `ТЕХНОРУФ Н ОПТИМА ${roofWoolThicknessMm}`, `BASWOOL РУФ Н ${roofWoolThicknessMm}`]
+        : ["ТЕХНОРУФ Н ПРОФ", "ТЕХНОРУФ Н ОПТИМА", "BASWOOL РУФ Н"],
+      factor: 1.03,
+      thicknessMm: roofWoolThicknessMm,
+      quantityType: roofWoolThicknessMm ? "m3" : "m2",
+      note: "В проекте указана минвата кровли; конкретную марку/схему слоев сверить по проекту КР/КО или спецификации.",
+    },
     {
       key: "primer_08",
       role: "грунтовка основания",
@@ -255,10 +291,19 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       note: "Конструктивное основание, в номенклатурный счет кровельных материалов не ставится.",
     },
     {
+      key: "external_roof_drainage",
+      role: "наружная водосточная система",
+      label: "Водосточные желоба/водосборные воронки",
+      detected: hasExternalRoofDrainage,
+      searchTerms: [],
+      quantityType: "project",
+      note: "В проекте указан наружный организованный водосток; спецификацию желобов, водосборных воронок, труб и крепежа запросить у производителя/проектировщика. В счет без ведомости не ставить.",
+    },
+    {
       key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
       role: "водоотвод/кровельная воронка",
       label: hasSquareParapetFunnel ? "Воронка парапетная квадратного сечения с галтелью 100х100х600" : hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
-      detected: includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
+      detected: !hasExternalRoofDrainage && includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
       searchTerms: hasParapetFunnel
         ? hasSquareParapetFunnel
           ? ["Воронка парапетная ТехноНИКОЛЬ квадратного сечения с галтелью 100*100*600", "Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
@@ -303,14 +348,15 @@ function buildRoofFastenerGuidance(text: string, question: string) {
 
 function buildRoofDrainGuidance(text: string, question: string, layers: DetectedLayer[]) {
   const signalText = `${text} ${question}`.toLowerCase();
-  const detectedInText = /воронк|водосточн[а-я\s-]*воронк|внутренн[а-я\s-]*водост/i.test(text.toLowerCase());
+  const hasExternalRoofDrainage = /наружн[а-я\s-]*организованн[а-я\s-]*водосток|водосточн[а-я\s-]*желоб|водосборн[а-я\s-]*воронк/i.test(text.toLowerCase());
+  const detectedInText = !hasExternalRoofDrainage && /воронк|водосточн[а-я\s-]*воронк|внутренн[а-я\s-]*водост/i.test(text.toLowerCase());
   const asksAboutDrains = /воронк|водосток|водоотвод|ливнев/i.test(signalText);
   const looksLikeFlatRoof = layers.some((layer) =>
     ["uniflex_epp", "technoelast_epp", "technoelast_ekp", "keramzit_slope", "pergamin"].includes(layer.key)
   );
 
   return {
-    shouldMention: asksAboutDrains || looksLikeFlatRoof,
+    shouldMention: !hasExternalRoofDrainage && (asksAboutDrains || looksLikeFlatRoof),
     detectedInText,
     calculatorUrl: "https://nav.tn.ru/calculators/calc-funnel/",
     source: "NAV.TN, калькулятор расчета количества кровельных воронок",
@@ -655,8 +701,9 @@ export async function POST(request: NextRequest) {
       const primary = matches[0] ?? null;
       const quantity = buildQuantity(layer, area, primary);
       const requiresProjectQuantity = layer.key.startsWith("roof_funnel") && !layer.unitCount;
+      const requiresMeasuredQuantity = layer.quantityType !== "project" && quantity.value === null;
 
-      if (primary?.code && !requiresProjectQuantity) {
+      if (primary?.code && !requiresProjectQuantity && !requiresMeasuredQuantity) {
         invoiceItems.push({
           role: layer.role,
           material: primary.name,
@@ -679,6 +726,8 @@ export async function POST(request: NextRequest) {
           calculation: quantity.text,
           note: requiresProjectQuantity
             ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
+            : requiresMeasuredQuantity
+              ? "Код 1С найден, но количество не рассчитано; в счет без площади/ведомости не ставить."
             : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.",
         });
       }
