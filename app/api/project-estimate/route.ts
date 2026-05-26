@@ -696,7 +696,13 @@ function parseRollArea(name: string | null) {
 
 function parsePackageVolume(name: string | null) {
   if (!name) return null;
-  const matches = Array.from(name.matchAll(/(\d+(?:[,.]\d+)?)\s*(?:м3|м³)/gi));
+  const packageMatch = name.match(/(\d+(?:[,.]\d+)?)\s*(?:м3|м³)\s*\/\s*(?:уп|упак|упаков)/i);
+  if (packageMatch?.[1]) {
+    const value = toNumber(packageMatch[1]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+
+  const matches = Array.from(name.matchAll(/(\d+(?:[,.]\d+)?)\s*(?:м3|м³)(?!\s*\/\s*под)/gi));
   if (!matches.length) return null;
   const last = matches[matches.length - 1]?.[1];
   if (!last) return null;
