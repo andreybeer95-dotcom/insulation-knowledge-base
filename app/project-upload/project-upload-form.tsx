@@ -32,6 +32,17 @@ type EstimateResponse = {
     note: string | null;
     alternatives: Array<{ code: string | null; name: string | null; brand: string | null }>;
   }>;
+  quoteItems?: Array<{
+    no: number;
+    code: string | null;
+    material: string | null;
+    unit: string;
+    quantity: string;
+    calculation: string;
+    role: string;
+    note: string | null;
+  }>;
+  quoteDraft?: string;
   projectOnly?: Array<{
     role: string;
     material: string;
@@ -75,12 +86,14 @@ export default function ProjectUploadForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSendingSelection, setIsSendingSelection] = useState(false);
   const [selectionStatus, setSelectionStatus] = useState<SelectionResponse | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const canSubmit = useMemo(() => Boolean(file) && !isLoading, [file, isLoading]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setFile(event.target.files?.[0] ?? null);
     setResult(null);
+    setCopyStatus("");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -90,6 +103,7 @@ export default function ProjectUploadForm() {
     setIsLoading(true);
     setResult(null);
     setSelectionStatus(null);
+    setCopyStatus("");
 
     const body = new FormData();
     body.append("file", file);
@@ -138,6 +152,18 @@ export default function ProjectUploadForm() {
       });
     } finally {
       setIsSendingSelection(false);
+    }
+  }
+
+  async function handleCopyQuoteDraft() {
+    const text = result?.quoteDraft?.trim();
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Скопировано");
+    } catch {
+      setCopyStatus("Не удалось скопировать");
     }
   }
 
@@ -237,14 +263,24 @@ export default function ProjectUploadForm() {
                     ({sourceLabel(result.area?.source)})
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSendToSelection}
-                  disabled={isSendingSelection}
-                  className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {isSendingSelection ? "Отправляю..." : "Отправить в подбор"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyQuoteDraft}
+                    disabled={!result.quoteDraft}
+                    className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {copyStatus || "Скопировать КП"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendToSelection}
+                    disabled={isSendingSelection}
+                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {isSendingSelection ? "Отправляю..." : "Отправить в подбор"}
+                  </button>
+                </div>
               </div>
 
               {selectionStatus && (
@@ -265,36 +301,51 @@ export default function ProjectUploadForm() {
                 </div>
               )}
 
+              {result.quoteDraft && (
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Черновик КП без цен
+                  </h3>
+                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-700">
+                    {result.quoteDraft}
+                  </pre>
+                </div>
+              )}
+
               <div>
                 <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                  В счет можно поставить
+                  Таблица для КП
                 </h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] border-collapse text-sm">
+                  <table className="w-full min-w-[920px] border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-slate-500">
-                        <th className="py-2 pr-3 font-medium">Роль</th>
-                        <th className="py-2 pr-3 font-medium">Материал</th>
+                        <th className="py-2 pr-3 font-medium">№</th>
                         <th className="py-2 pr-3 font-medium">Код 1С</th>
+                        <th className="py-2 pr-3 font-medium">Наименование</th>
+                        <th className="py-2 pr-3 font-medium">Кол-во</th>
+                        <th className="py-2 pr-3 font-medium">Ед.</th>
                         <th className="py-2 pr-3 font-medium">Расчет</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(result.invoiceItems ?? []).map((item) => (
-                        <tr key={`${item.code}-${item.role}`} className="border-b border-slate-100 align-top">
-                          <td className="py-3 pr-3 text-slate-600">{item.role}</td>
+                      {(result.quoteItems ?? []).map((item) => (
+                        <tr key={`${item.no}-${item.code}-${item.role}`} className="border-b border-slate-100 align-top">
+                          <td className="py-3 pr-3 text-slate-500">{item.no}</td>
+                          <td className="py-3 pr-3 font-semibold text-slate-950">{item.code}</td>
                           <td className="py-3 pr-3">
                             <div className="font-medium text-slate-950">{item.material}</div>
-                            <div className="mt-1 text-xs text-slate-500">из проекта: {item.requestedLayer}</div>
+                            <div className="mt-1 text-xs text-slate-500">{item.role}</div>
                             {item.note && <div className="mt-1 text-xs text-amber-700">{item.note}</div>}
                           </td>
-                          <td className="py-3 pr-3 font-semibold text-slate-950">{item.code}</td>
+                          <td className="py-3 pr-3 font-semibold text-slate-950">{item.quantity}</td>
+                          <td className="py-3 pr-3 text-slate-700">{item.unit}</td>
                           <td className="py-3 pr-3 text-slate-700">{item.calculation}</td>
                         </tr>
                       ))}
-                      {!result.invoiceItems?.length && (
+                      {!result.quoteItems?.length && (
                         <tr>
-                          <td colSpan={4} className="py-5 text-center text-slate-500">
+                          <td colSpan={6} className="py-5 text-center text-slate-500">
                             Автоматически счетные позиции с кодами 1С не найдены.
                           </td>
                         </tr>

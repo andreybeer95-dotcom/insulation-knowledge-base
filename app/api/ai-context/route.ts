@@ -344,6 +344,9 @@ export async function GET(request: NextRequest) {
   const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
   const hasRoofProjectQueryForNomenclature =
     /кровл|крыша|скат|плоск|металлочерепиц|гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|пвх.*мембран|мембран.*пвх|logicroof|shinglas|шинглас/i.test(rawQuery)
+  const hasPitchedRoofCoveringChoiceQuery =
+    /металлочерепиц[\s\S]{0,80}(?:или|\/)\s*(?:мягк|гибк|битумн)|(?:мягк|гибк|битумн)[\s\S]{0,80}(?:или|\/)\s*металлочерепиц/i.test(rawQuery) &&
+    /проект|подобр|выбор|какой|что\s+лучше|сравн|посоветуй|порекомендуй/i.test(rawQuery)
   const shouldIgnoreNumericNomenclatureForRoofProject =
     hasRoofProjectQueryForNomenclature && !hasCylinderQueryForNomenclature
   const allKeywords = [
@@ -1708,10 +1711,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature)) {
+  if (!product_id && relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature)) {
     products = []
   }
-  if (hasPipelinePvcSystemQuery) {
+  if (!product_id && isPvcRoofProjectWithoutMainSpec && relevant_nomenclature.length > 0) {
+    // В проектных сценариях без главной спецификации не показываем случайные fallback-позиции, если есть номенклатурные замены.
+    products = []
+  }
+  if (!product_id && hasPitchedRoofCoveringChoiceQuery) {
+    // Для неоднозначного выбора покрытия не подмешиваем случайный каталог.
+    products = []
+  }
+  if (!product_id && hasPipelinePvcSystemQuery) {
     products = []
   }
   if (isBareThicknessOnly) {

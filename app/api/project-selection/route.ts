@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 function buildCompactSummary(estimate: any) {
+  if (typeof estimate?.quoteDraft === "string" && estimate.quoteDraft.trim()) {
+    return estimate.quoteDraft;
+  }
+
   const lines: string[] = [];
   lines.push(`Файл: ${estimate?.fileName ?? "PDF проекта"}`);
   if (estimate?.area?.value) {
@@ -64,12 +68,15 @@ export async function POST(request: NextRequest) {
       process.env.N8N_PROJECT_SELECTION_WEBHOOK_URL ||
       "";
 
+    const compactSummary = buildCompactSummary(estimate);
     const payload = {
       event: "project_estimate_ready",
       source: "project-upload",
       createdAt: new Date().toISOString(),
       managerComment: body?.comment ?? "",
-      compactSummary: buildCompactSummary(estimate),
+      compactSummary,
+      quoteDraft: estimate?.quoteDraft ?? compactSummary,
+      quoteItems: estimate?.quoteItems ?? [],
       estimate,
     };
 

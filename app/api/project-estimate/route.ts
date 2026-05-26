@@ -13,6 +13,28 @@ type NomenclatureItem = {
   brand: string | null;
 };
 
+type InvoiceItem = {
+  role: string;
+  material: string | null;
+  requestedLayer: string;
+  code: string | null;
+  brand: string | null;
+  calculation: string;
+  note: string | null;
+  alternatives: Array<{ code: string | null; name: string | null; brand: string | null }>;
+};
+
+type QuoteItem = {
+  no: number;
+  code: string | null;
+  material: string | null;
+  unit: string;
+  quantity: string;
+  calculation: string;
+  role: string;
+  note: string | null;
+};
+
 let localNomenclatureCache: NomenclatureItem[] | null = null;
 
 type AreaInfo = {
@@ -497,6 +519,86 @@ function buildProjectQuery(summary: {
     .join(". ");
 }
 
+function extractQuoteQuantity(calculation: string) {
+  const orientMatch = calculation.match(/ориентир\s+(\d+(?:[,.]\d+)?)\s*(рул|уп|меш|шт)\.?/i);
+  if (orientMatch?.[1] && orientMatch?.[2]) {
+    return {
+      quantity: orientMatch[1].replace(",", "."),
+      unit: orientMatch[2].replace(/\.$/, ""),
+    };
+  }
+
+  const unitMatch = calculation.match(/^(\d+(?:[,.]\d+)?)\s*(шт|м2|м²|м3|м³)\b/i);
+  if (unitMatch?.[1] && unitMatch?.[2]) {
+    return {
+      quantity: unitMatch[1].replace(",", "."),
+      unit: unitMatch[2].replace("²", "2").replace("³", "3"),
+    };
+  }
+
+  return {
+    quantity: "по проекту",
+    unit: "расчет",
+  };
+}
+
+function buildQuoteItems(invoiceItems: InvoiceItem[]): QuoteItem[] {
+  return invoiceItems.map((item, index) => {
+    const qty = extractQuoteQuantity(item.calculation);
+    return {
+      no: index + 1,
+      code: item.code,
+      material: item.material,
+      unit: qty.unit,
+      quantity: qty.quantity,
+      calculation: item.calculation,
+      role: item.role,
+      note: item.note,
+    };
+  });
+}
+
+function buildQuoteDraft(summary: {
+  fileName: string;
+  area: AreaInfo;
+  quoteItems: QuoteItem[];
+  notFound: Array<{ role: string; requestedLayer: string; calculation: string; note: string }>;
+  projectOnly: Array<{ role: string; material: string; note?: string }>;
+}) {
+  const lines: string[] = [];
+  lines.push(`Черновик КП без цен: ${summary.fileName}`);
+  lines.push(`Площадь: ${summary.area.value ? `${summary.area.value} м2 (${summary.area.source})` : "не найдена"}`);
+  lines.push("");
+
+  if (summary.quoteItems.length) {
+    lines.push("В счет:");
+    lines.push("№ | Код 1С | Наименование | Кол-во | Ед. | Основание расчета");
+    for (const item of summary.quoteItems) {
+      lines.push(`${item.no} | ${item.code ?? "код не найден"} | ${item.material ?? "материал не найден"} | ${item.quantity} | ${item.unit} | ${item.calculation}`);
+    }
+  } else {
+    lines.push("В счет: счетные позиции с кодами 1С автоматически не найдены.");
+  }
+
+  if (summary.notFound.length) {
+    lines.push("");
+    lines.push("Проверить перед КП:");
+    for (const item of summary.notFound) {
+      lines.push(`- ${item.role}: ${item.requestedLayer}. ${item.calculation}`);
+    }
+  }
+
+  if (summary.projectOnly.length) {
+    lines.push("");
+    lines.push("Проектные слои, не ставить в счет материалов:");
+    for (const item of summary.projectOnly) {
+      lines.push(`- ${item.role}: ${item.material}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
@@ -535,9 +637,9 @@ export async function POST(request: NextRequest) {
     const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
 
-    const invoiceItems = [];
-    const notFound = [];
-    const projectOnly = [];
+    const invoiceItems: InvoiceItem[] = [];
+    const notFound: Array<{ role: string; requestedLayer: string; searchTerms: string[]; calculation: string; note: string }> = [];
+    const projectOnly: Array<{ role: string; material: string; note?: string }> = [];
 
     for (const layer of layers) {
       if (layer.projectOnly) {
@@ -592,6 +694,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const quoteItems = buildQuoteItems(invoiceItems);
+    const quoteDraft = buildQuoteDraft({
+      fileName: file.name,
+      area,
+      quoteItems,
+      notFound,
+      projectOnly,
+    });
+
     return NextResponse.json({
       ok: true,
       fileName: file.name,
@@ -608,6 +719,8 @@ export async function POST(request: NextRequest) {
         note: layer.note ?? null,
       })),
       invoiceItems,
+      quoteItems,
+      quoteDraft,
       projectOnly,
       notFound,
       roofFastenerGuidance,
