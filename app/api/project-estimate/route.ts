@@ -704,7 +704,8 @@ function buildQuoteDraft(summary: {
     lines.push("Проверить перед КП:");
     for (const item of summary.notFound) {
       const calculation = item.calculation.replace(/\.$/, "");
-      const note = item.note && !calculation.includes(item.note) ? ` ${item.note}` : "";
+      const normalizedNote = item.note?.replace(/\.$/, "");
+      const note = normalizedNote && !calculation.includes(normalizedNote) ? ` ${normalizedNote}.` : "";
       lines.push(`- ${item.role}: ${item.requestedLayer}. ${calculation}.${note}`);
     }
   }
