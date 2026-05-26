@@ -103,6 +103,7 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
   }
 
   const roofAreaPatterns = [
+    new RegExp(`(?:площадь\\s+(?:кровли|покрытия))\\s*,?\\s*(?:м\\s*2|м2|м²|кв\\.?\\s*м)\\s*${NUMBER}`, "i"),
     new RegExp(`(?:площадь\\s+(?:кровли|покрытия)|s\\s*(?:кровли|покрытия))[^\\d]{0,30}${NUMBER}\\s*(?:м2|м²|кв\\.?\\s*м)`, "i"),
     new RegExp(`${NUMBER}\\s*(?:м2|м²|кв\\.?\\s*м)[^\\.]{0,40}(?:кровли|покрытия)`, "i"),
   ];
