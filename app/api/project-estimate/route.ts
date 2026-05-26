@@ -153,14 +153,75 @@ function detectUnitCount(text: string, keyword: RegExp) {
   return undefined;
 }
 
+function detectRoofWoolLayers(lower: string): DetectedLayer[] {
+  const result = new Map<string, DetectedLayer>();
+
+  const addTechnorufLayer = (letter: string, density: string, thickness: string) => {
+    const normalizedLetter = letter.toLowerCase() === "в" ? "В" : "Н";
+    const densityLabel = `${normalizedLetter}${density}`;
+    const thicknessMm = Number(thickness);
+    if (!Number.isFinite(thicknessMm)) return;
+
+    const key = `technoruf_${normalizedLetter.toLowerCase()}${density}_${thicknessMm}`;
+    result.set(key, {
+      key,
+      role: normalizedLetter === "В" ? "верхний слой теплоизоляции кровли" : "нижний слой теплоизоляции кровли",
+      label: `Техноруф ${densityLabel} ${thicknessMm} мм`,
+      detected: true,
+      searchTerms: [
+        `ТЕХНОРУФ ${densityLabel} ${thicknessMm}`,
+        `ТЕХНОРУФ ${normalizedLetter} ${density} ${thicknessMm}`,
+        `ТЕХНОРУФ ${densityLabel}`,
+      ],
+      factor: 1.03,
+      thicknessMm,
+      quantityType: "m3",
+      note: "Марку, плотность и толщину теплоизоляции сверить по ведомости кровли/КР перед КП.",
+    });
+  };
+
+  for (const match of lower.matchAll(/технор[уо]ф\s*([вн])\s*(\d{2,3})\s*[-–—]?\s*(\d{2,3})\s*мм/gi)) {
+    const index = match.index ?? 0;
+    const context = lower.slice(Math.max(0, index - 260), index + 260);
+    if (/кровл|logicroof|профлист|мембран|гидроветрозащит/i.test(context)) {
+      addTechnorufLayer(match[1], match[2], match[3]);
+    }
+  }
+
+  if (result.size) return Array.from(result.values());
+
+  for (const match of lower.matchAll(/кровл[а-я\s—–-]{0,220}минераловатн[а-я\s—–-]*утеплител[а-я\s—–-]*(?:t\s*=\s*)?(\d{2,3})\s*мм/gi)) {
+    const thicknessMm = Number(match[1]);
+    if (!Number.isFinite(thicknessMm)) continue;
+
+    result.set("roof_mw", {
+      key: "roof_mw",
+      role: "теплоизоляция кровли",
+      label: `Минераловатный утеплитель кровли ${thicknessMm} мм`,
+      detected: true,
+      searchTerms: [
+        `ТЕХНОРУФ Н ПРОФ ${thicknessMm}`,
+        `ТЕХНОРУФ Н ОПТИМА ${thicknessMm}`,
+        `BASWOOL РУФ Н ${thicknessMm}`,
+      ],
+      factor: 1.03,
+      thicknessMm,
+      quantityType: "m3",
+      note: "В проекте указана минвата кровли; конкретную марку/схему слоев сверить по проекту КР/КО или спецификации.",
+    });
+    break;
+  }
+
+  return Array.from(result.values());
+}
+
 function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const pvcMembraneThicknessMatch = lower.match(/(?:logicroof\s+v-rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
-  const roofWoolThicknessMatch = lower.match(/(?:минераловатн[а-я\s-]*утеплител|минват[а-я\s-]*утеплител|утеплител[а-я\s-]*минераловатн)[^\d]{0,60}(?:t\s*=\s*)?(\d{2,3})\s*мм/i);
-  const roofWoolThicknessMm = roofWoolThicknessMatch?.[1] ? Number(roofWoolThicknessMatch[1]) : undefined;
+  const roofWoolLayers = detectRoofWoolLayers(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
     /наружн[а-я\s-]*организованн[а-я\s-]*водосток/i,
     /водосточн[а-я\s-]*желоб/i,
@@ -190,18 +251,26 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         ? "Марку и толщину мембраны сверить по проекту перед КП."
         : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
     },
+    ...roofWoolLayers,
     {
-      key: "roof_mw",
-      role: "теплоизоляция кровли",
-      label: roofWoolThicknessMm ? `Минераловатный утеплитель кровли ${roofWoolThicknessMm} мм` : "Минераловатный утеплитель кровли",
-      detected: includesAny(lower, [/кровл[а-я\s-]*мембран[а-я\s-]*по\s+профлист[а-я\s-]*с\s+минераловатн[а-я\s-]*утеплител/i, /минераловатн[а-я\s-]*утеплител[а-я\s-]*(?:t\s*=\s*)?\d{2,3}\s*мм/i]),
-      searchTerms: roofWoolThicknessMm
-        ? [`ТЕХНОРУФ Н ПРОФ ${roofWoolThicknessMm}`, `ТЕХНОРУФ Н ОПТИМА ${roofWoolThicknessMm}`, `BASWOOL РУФ Н ${roofWoolThicknessMm}`]
-        : ["ТЕХНОРУФ Н ПРОФ", "ТЕХНОРУФ Н ОПТИМА", "BASWOOL РУФ Н"],
-      factor: 1.03,
-      thicknessMm: roofWoolThicknessMm,
-      quantityType: roofWoolThicknessMm ? "m3" : "m2",
-      note: "В проекте указана минвата кровли; конкретную марку/схему слоев сверить по проекту КР/КО или спецификации.",
+      key: "hydrowind_membrane",
+      role: "гидроветрозащитная мембрана",
+      label: "Гидроветрозащитная мембрана",
+      detected: includesAny(lower, [/гидро\s*ветрозащитн[а-я\s-]*мембран/i, /гидроветрозащитн[а-я\s-]*мембран/i]),
+      searchTerms: ["Гидроветрозащитная мембрана", "Гидро-ветрозащитная мембрана", "Ветрозащитная мембрана"],
+      factor: 1.15,
+      quantityType: "m2",
+      note: "Тип мембраны и допустимость применения в кровельном пироге сверить по проекту/системе.",
+    },
+    {
+      key: "profiled_sheet_n57",
+      role: "несущее основание/профлист",
+      label: "Стальной профлист Н57",
+      detected: includesAny(lower, [/стальн[а-я\s-]*профлист\s*н\s*57/i, /профлист\s*н\s*57/i]),
+      searchTerms: [],
+      quantityType: "project",
+      projectOnly: true,
+      note: "Профлист Н57 считать по КМ/КМД или ведомости профлиста; по площади кровли автоматически в счет не ставить.",
     },
     {
       key: "primer_08",
@@ -393,6 +462,10 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "primer_08" && /0?8|№08|n08/i.test(item.name ?? "")) score += 12;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
+  if (layer.key.startsWith("technoruf_") && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
+  if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
+  if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
+  if (layer.key === "hydrowind_membrane" && /гидро.?ветрозащит|ветрозащит/i.test(item.name ?? "")) score += 14;
   if (layer.key === "keramzit_slope" && /20-40|20\/40/i.test(item.name ?? "")) score += 4;
   if (layer.key.startsWith("roof_funnel") && /воронк/i.test(item.name ?? "")) score += 18;
   if (layer.key === "roof_funnel_parapet" && /парапет/i.test(item.name ?? "")) score += 16;
