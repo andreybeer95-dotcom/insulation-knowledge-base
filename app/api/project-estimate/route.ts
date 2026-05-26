@@ -56,6 +56,7 @@ type DetectedLayer = {
   projectOnly?: boolean;
   note?: string;
   unitCount?: number;
+  areaOverride?: number;
 };
 
 const NUMBER = String.raw`(\d+(?:[,.]\d+)?)`;
@@ -81,6 +82,36 @@ function round(value: number, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function sumAreaMatches(text: string, pattern: RegExp) {
+  return Array.from(text.matchAll(pattern)).reduce((sum, match) => {
+    const value = match[1] ? toNumber(match[1]) : NaN;
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+}
+
+function extractRoofSpecAreas(text: string) {
+  const lower = text.toLowerCase();
+  const membraneOnConcreteArea = sumAreaMatches(
+    lower,
+    /полимерная мембрана logicroof v-rp[\s\S]{0,500}?logicpir prof[\s\S]{0,120}?40\s*мм[\s\S]{0,500}?технобарьер[\s\S]{0,180}?монолитн[\s\S]{0,80}?(\d{1,6}[,.]\d{2})/gi
+  );
+  const membraneOnProfiledSheetArea = sumAreaMatches(
+    lower,
+    /полимерная мембрана logicroof v-rp[\s\S]{0,500}?logicpir prof[\s\S]{0,120}?70\s*мм[\s\S]{0,500}?техноруф н проф[\s\S]{0,120}?100\s*мм[\s\S]{0,300}?профнастил[\s\S]{0,80}?(\d{1,6}[,.]\d{2})/gi
+  );
+  const sandwichRoofArea = sumAreaMatches(
+    lower,
+    /трехслойные металлические кровельные сэндвич-панели[\s\S]{0,300}?t\s*=\s*100\s*мм[\s\S]{0,400}?(\d{1,6}[,.]\d{2})/gi
+  );
+
+  return {
+    membraneOnConcreteArea: round(membraneOnConcreteArea, 2),
+    membraneOnProfiledSheetArea: round(membraneOnProfiledSheetArea, 2),
+    membraneTotalArea: round(membraneOnConcreteArea + membraneOnProfiledSheetArea, 2),
+    sandwichRoofArea: round(sandwichRoofArea, 2),
+  };
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
@@ -99,6 +130,18 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
       source: "manager_input",
       confidence: "high",
       note: "Площадь указана менеджером в форме.",
+    };
+  }
+
+  const roofSpecAreas = extractRoofSpecAreas(text);
+  if (roofSpecAreas.membraneTotalArea > 0) {
+    return {
+      value: roofSpecAreas.membraneTotalArea,
+      source: "pdf_text",
+      confidence: "medium",
+      note: roofSpecAreas.sandwichRoofArea > 0
+        ? `Площадь мембранной кровли взята из спецификации кровельного покрытия. Отдельно найден тип кровли из сэндвич-панелей ${roofSpecAreas.sandwichRoofArea} м2; его считать отдельно по ведомости/номенклатуре.`
+        : "Площадь мембранной кровли взята из спецификации кровельного покрытия.",
     };
   }
 
@@ -152,6 +195,12 @@ function detectUnitCount(text: string, keyword: RegExp) {
     if (keywordPattern.test(context)) return Number(match[1]);
   }
   return undefined;
+}
+
+function detectParapetFunnelCount(text: string) {
+  const matches = Array.from(text.matchAll(/спецификация парапетных воронок[\s\S]{0,500}?вп-1[\s\S]{0,300}?(\d{1,3})(?=\s+спецификация|\s+марка|\s+\d+\.\d|$)/gi));
+  const total = matches.reduce((sum, match) => sum + Number(match[1] ?? 0), 0);
+  return total > 0 ? total : undefined;
 }
 
 function detectRoofWoolLayers(lower: string): DetectedLayer[] {
@@ -220,7 +269,9 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
-  const pvcMembraneThicknessMatch = lower.match(/(?:logicroof\s+v-rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
+  const roofSpecAreas = extractRoofSpecAreas(lower);
+  const pvcMembraneThicknessMatch = lower.match(/logicroof\s+v-rp[\s\S]{0,80}?(\d(?:[,.]\d)?)\s*мм/i)
+    ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const roofWoolLayers = detectRoofWoolLayers(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
@@ -230,7 +281,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   ]);
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
   const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
-  const funnelUnitCount = detectUnitCount(lower, /воронк[а-я]*/);
+  const funnelUnitCount = hasParapetFunnel ? detectParapetFunnelCount(lower) ?? detectUnitCount(lower, /воронк[а-я]*/) : detectUnitCount(lower, /воронк[а-я]*/);
 
   const keramzitSlope = lower.match(/керамзит[а-я\s-]*грав[а-я\s-]*?(\d{2,3})\s*(?:\.{2,3}|-)\s*(\d{2,3})\s*мм/i);
   const keramzitAvg = keramzitSlope?.[1] && keramzitSlope?.[2]
@@ -247,12 +298,70 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         ? [`Logicroof V-RP ${String(pvcMembraneThicknessMm).replace(".", ",")}`, `Logicroof V-RP ${pvcMembraneThicknessMm}`, "ПВХ Logicroof V-RP"]
         : [],
       factor: 1.15,
+      areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
       quantityType: "m2",
       note: pvcMembraneThicknessMm
         ? "Марку и толщину мембраны сверить по проекту перед КП."
         : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
     },
+    {
+      key: "logicpir_prof_ff_40_double",
+      role: "теплоизоляция по Ж/Б, LOGICPIR",
+      label: "LOGICPIR PROF Ф/Ф 40 мм, 2 слоя",
+      detected: roofSpecAreas.membraneOnConcreteArea > 0 && /logicpir prof[\s\S]{0,80}?40\s*мм/i.test(lower),
+      searchTerms: ["LOGICPIR PROF Ф/Ф 40", "LOGICPIR PROF 40", "LOGICPIR PROF Ф/Ф Г1 40"],
+      factor: 1.03,
+      thicknessMm: 40,
+      areaOverride: roofSpecAreas.membraneOnConcreteArea * 2,
+      quantityType: "m3",
+      note: "В спецификации по Ж/Б указаны два слоя LOGICPIR PROF Ф/Ф 40 мм; количество посчитано как два слоя по площади этого типа кровли.",
+    },
+    {
+      key: "logicpir_prof_ff_70",
+      role: "теплоизоляция по профлисту, LOGICPIR",
+      label: "LOGICPIR PROF Ф/Ф 70 мм",
+      detected: roofSpecAreas.membraneOnProfiledSheetArea > 0 && /logicpir prof[\s\S]{0,80}?70\s*мм/i.test(lower),
+      searchTerms: ["LOGICPIR PROF Ф/Ф 70", "LOGICPIR PROF 70", "LOGICPIR PROF Ф/Ф Г1 70"],
+      factor: 1.03,
+      thicknessMm: 70,
+      areaOverride: roofSpecAreas.membraneOnProfiledSheetArea,
+      quantityType: "m3",
+      note: "Слой относится к типу кровли по профлисту; площадь взята из спецификации кровельного покрытия.",
+    },
     ...roofWoolLayers,
+    {
+      key: "technoruf_n_prof_100_spec",
+      role: "теплоизоляция по профлисту, каменная вата",
+      label: "ТЕХНОРУФ Н ПРОФ 100 мм",
+      detected: roofSpecAreas.membraneOnProfiledSheetArea > 0 && /техноруф н проф[\s\S]{0,80}?100\s*мм/i.test(lower),
+      searchTerms: ["ТЕХНОРУФ Н ПРОФ 100", "ТЕХНОРУФ Н 30 100", "ТЕХНОРУФ Н ПРОФ"],
+      factor: 1.03,
+      thicknessMm: 100,
+      areaOverride: roofSpecAreas.membraneOnProfiledSheetArea,
+      quantityType: "m3",
+      note: "Слой относится к типу кровли по профлисту; конкретную марку ТЕХНОРУФ Н ПРОФ сверить по ведомости.",
+    },
+    {
+      key: "logicpir_slope",
+      role: "уклонообразующий слой LOGICPIR SLOPE",
+      label: "LOGICPIR SLOPE",
+      detected: includesAny(lower, [/logicpir slope/i]),
+      searchTerms: [],
+      quantityType: "project",
+      projectOnly: true,
+      note: "Количество клиновидных плит LOGICPIR SLOPE считать по плану уклонов/раскладке элементов, не по общей площади.",
+    },
+    {
+      key: "technobarrier",
+      role: "пароизоляция",
+      label: "ТЕХНОБАРЬЕР / Паробарьер C",
+      detected: includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i]),
+      searchTerms: ["ТЕХНОБАРЬЕР", "Паробарьер C", "Паробарьер"],
+      factor: 1.12,
+      areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
+      quantityType: "m2",
+      note: "Марку пароизоляции сверить: в разных местах проекта указаны ТЕХНОБАРЬЕР и Паробарьер C.",
+    },
     {
       key: "hydrowind_membrane",
       role: "гидроветрозащитная мембрана",
@@ -272,6 +381,16 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       quantityType: "project",
       projectOnly: true,
       note: "Профлист Н57 считать по КМ/КМД или ведомости профлиста; по площади кровли автоматически в счет не ставить.",
+    },
+    {
+      key: "roof_sandwich_panel_100",
+      role: "кровельные сэндвич-панели",
+      label: roofSpecAreas.sandwichRoofArea > 0 ? `Кровельные сэндвич-панели 100 мм, ${roofSpecAreas.sandwichRoofArea} м2` : "Кровельные сэндвич-панели 100 мм",
+      detected: roofSpecAreas.sandwichRoofArea > 0,
+      searchTerms: [],
+      quantityType: "project",
+      projectOnly: true,
+      note: "Отдельный тип кровли по спецификации. В счет ставить только после подбора производителя/замены и кода 1С по сэндвич-панелям.",
     },
     {
       key: "primer_08",
@@ -373,7 +492,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
       role: "водоотвод/кровельная воронка",
       label: hasSquareParapetFunnel ? "Воронка парапетная квадратного сечения с галтелью 100х100х600" : hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
-      detected: !hasExternalRoofDrainage && includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
+      detected: (!hasExternalRoofDrainage || hasParapetFunnel) && includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
       searchTerms: hasParapetFunnel
         ? hasSquareParapetFunnel
           ? ["Воронка парапетная ТехноНИКОЛЬ квадратного сечения с галтелью 100*100*600", "Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
@@ -467,6 +586,13 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "pvc_logicroof_vrp" && /2[,.]10\s*[xх]\s*20/i.test(item.name ?? "")) score += 4;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
+  if (layer.key.startsWith("logicpir_prof") && /logicpir/i.test(item.name ?? "") && /prof/i.test(item.name ?? "")) score += 16;
+  if (layer.key.startsWith("logicpir_prof") && /ф\/ф|f\/f/i.test(item.name ?? "")) score += 8;
+  if (layer.key.includes("_40") && /40\b|40\s*мм/i.test(item.name ?? "")) score += 10;
+  if (layer.key.includes("_70") && /70\b|70\s*мм/i.test(item.name ?? "")) score += 10;
+  if (layer.key === "technobarrier" && /технобарьер|паробарьер/i.test(item.name ?? "")) score += 14;
+  if (layer.key === "technoruf_n_prof_100_spec" && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
+  if (layer.key === "technoruf_n_prof_100_spec" && /н\s*(?:проф|30)|н30/i.test(item.name ?? "")) score += 10;
   if (layer.key.startsWith("technoruf_") && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
@@ -579,7 +705,8 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
     };
   }
 
-  if (!area.value) {
+  const basisArea = layer.areaOverride ?? area.value;
+  if (!basisArea) {
     return {
       value: null,
       text: "Площадь кровли не найдена; количество не рассчитано.",
@@ -587,7 +714,7 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
   }
 
   if (layer.quantityType === "m2") {
-    const qty = area.value * (layer.factor ?? 1);
+    const qty = basisArea * (layer.factor ?? 1);
     const rollArea = parseRollArea(item?.name ?? null);
     const rolls = rollArea !== null ? Math.ceil(qty / rollArea) : null;
     return {
@@ -599,7 +726,7 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
   }
 
   if (layer.quantityType === "m3" && layer.thicknessMm) {
-    const qty = area.value * (layer.thicknessMm / 1000) * (layer.factor ?? 1);
+    const qty = basisArea * (layer.thicknessMm / 1000) * (layer.factor ?? 1);
     const packageVolume = parsePackageVolume(item?.name ?? null);
     if (packageVolume !== null) {
       return {
@@ -615,7 +742,7 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
     }
     return {
       value: round(qty, 3),
-      text: `${round(qty, 3)} м3 (${round(area.value * (layer.factor ?? 1), 2)} м2 x ${layer.thicknessMm} мм)`,
+      text: `${round(qty, 3)} м3 (${round(basisArea * (layer.factor ?? 1), 2)} м2 x ${layer.thicknessMm} мм)`,
     };
   }
 

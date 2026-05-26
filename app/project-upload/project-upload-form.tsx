@@ -377,14 +377,20 @@ export default function ProjectUploadForm() {
                     Требует проверки
                   </h3>
                   <div className="grid gap-2">
-                    {(result.notFound ?? []).map((item) => (
-                      <div key={`${item.role}-${item.requestedLayer}`} className="rounded-md bg-slate-50 p-3 text-sm">
-                        <div className="font-medium text-slate-800">{item.requestedLayer}</div>
-                        <div className="text-slate-500">{item.role}</div>
-                        <div className="mt-1 text-xs text-slate-500">{item.calculation}</div>
-                        <div className="mt-1 text-xs text-amber-700">{item.note}</div>
-                      </div>
-                    ))}
+                    {(result.notFound ?? []).map((item) => {
+                      const calculation = item.calculation?.replace(/\.$/, "");
+                      const note = item.note?.replace(/\.$/, "");
+                      const showNote = note && !calculation?.includes(note);
+
+                      return (
+                        <div key={`${item.role}-${item.requestedLayer}`} className="rounded-md bg-slate-50 p-3 text-sm">
+                          <div className="font-medium text-slate-800">{item.requestedLayer}</div>
+                          <div className="text-slate-500">{item.role}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.calculation}</div>
+                          {showNote && <div className="mt-1 text-xs text-amber-700">{item.note}</div>}
+                        </div>
+                      );
+                    })}
                     {!result.notFound?.length && <p className="text-sm text-slate-500">Хвостов нет.</p>}
                   </div>
                 </div>
