@@ -461,6 +461,10 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("epp") && /эпп/i.test(item.name ?? "")) score += 10;
   if (layer.key.includes("ekp") && /экп/i.test(item.name ?? "")) score += 10;
   if (layer.key === "primer_08" && /0?8|№08|n08/i.test(item.name ?? "")) score += 12;
+  if (layer.key === "pvc_logicroof_vrp" && /logicroof/i.test(item.name ?? "") && /v-rp/i.test(item.name ?? "")) score += 16;
+  if (layer.key === "pvc_logicroof_vrp" && layer.thicknessMm && name.includes(String(layer.thicknessMm).replace(".", ","))) score += 8;
+  if (layer.key === "pvc_logicroof_vrp" && /arctic|arctiс/i.test(item.name ?? "") && !/arctic|arctiс/i.test(requested)) score -= 20;
+  if (layer.key === "pvc_logicroof_vrp" && /2[,.]10\s*[xх]\s*20/i.test(item.name ?? "")) score += 4;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
   if (layer.key.startsWith("technoruf_") && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
