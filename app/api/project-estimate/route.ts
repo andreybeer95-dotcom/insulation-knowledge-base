@@ -703,7 +703,9 @@ function buildQuoteDraft(summary: {
     lines.push("");
     lines.push("Проверить перед КП:");
     for (const item of summary.notFound) {
-      lines.push(`- ${item.role}: ${item.requestedLayer}. ${item.calculation}`);
+      const calculation = item.calculation.replace(/\.$/, "");
+      const note = item.note ? ` ${item.note}` : "";
+      lines.push(`- ${item.role}: ${item.requestedLayer}. ${calculation}.${note}`);
     }
   }
 
@@ -792,16 +794,20 @@ export async function POST(request: NextRequest) {
           })),
         });
       } else {
+        const missingReason = requiresProjectQuantity
+          ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
+          : requiresMeasuredQuantity
+            ? "Код 1С найден, но количество не рассчитано; в счет без площади/ведомости не ставить."
+            : !layer.searchTerms.length && layer.note
+              ? layer.note
+              : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.";
+
         notFound.push({
           role: layer.role,
           requestedLayer: layer.label,
           searchTerms: layer.searchTerms,
           calculation: quantity.text,
-          note: requiresProjectQuantity
-            ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
-            : requiresMeasuredQuantity
-              ? "Код 1С найден, но количество не рассчитано; в счет без площади/ведомости не ставить."
-            : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.",
+          note: missingReason,
         });
       }
     }
