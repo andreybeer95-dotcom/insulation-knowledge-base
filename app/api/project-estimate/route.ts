@@ -700,7 +700,7 @@ function parsePackageVolume(name: string | null) {
 function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureItem | null) {
   if (layer.quantityType === "project") {
     return {
-      value: null,
+      value: layer.unitCount ?? null,
       text: layer.unitCount ? `${layer.unitCount} шт по проекту/задаче менеджера; тип воронки сверить по проекту водоотвода.` : layer.note ?? "Расход по проекту.",
     };
   }
@@ -779,7 +779,7 @@ function extractQuoteQuantity(calculation: string) {
     };
   }
 
-  const unitMatch = calculation.match(/^(\d+(?:[,.]\d+)?)\s*(шт|м2|м²|м3|м³)\b/i);
+  const unitMatch = calculation.match(/^(\d+(?:[,.]\d+)?)\s*(шт|м2|м²|м3|м³)(?=\s|$|[;,.])/i);
   if (unitMatch?.[1] && unitMatch?.[2]) {
     return {
       quantity: unitMatch[1].replace(",", "."),
