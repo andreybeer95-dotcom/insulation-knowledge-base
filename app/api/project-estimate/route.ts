@@ -33,6 +33,7 @@ type DetectedLayer = {
   quantityType: "m2" | "m3" | "project";
   projectOnly?: boolean;
   note?: string;
+  unitCount?: number;
 };
 
 const NUMBER = String.raw`(\d+(?:[,.]\d+)?)`;
@@ -119,11 +120,21 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
   };
 }
 
-function detectLayers(text: string): DetectedLayer[] {
-  const lower = text.toLowerCase();
+function detectUnitCount(text: string, keyword: RegExp) {
+  const before = text.match(new RegExp(`${keyword.source}[^\\d]{0,80}(\\d{1,4})\\s*шт`, "i"));
+  if (before?.[1]) return Number(before[1]);
+  const after = text.match(new RegExp(`(\\d{1,4})\\s*шт[^\\n.]{0,80}${keyword.source}`, "i"));
+  if (after?.[1]) return Number(after[1]);
+  return undefined;
+}
+
+function detectLayers(text: string, question = ""): DetectedLayer[] {
+  const lower = `${text} ${question}`.toLowerCase();
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
+  const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
+  const funnelUnitCount = detectUnitCount(lower, /воронк[а-я]*/);
 
   const keramzitSlope = lower.match(/керамзит[а-я\s-]*грав[а-я\s-]*?(\d{2,3})\s*(?:\.{2,3}|-)\s*(\d{2,3})\s*мм/i);
   const keramzitAvg = keramzitSlope?.[1] && keramzitSlope?.[2]
@@ -221,12 +232,15 @@ function detectLayers(text: string): DetectedLayer[] {
     {
       key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
       role: "водоотвод/кровельная воронка",
-      label: hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
+      label: hasSquareParapetFunnel ? "Воронка парапетная квадратного сечения с галтелью 100х100х600" : hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
       detected: includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
       searchTerms: hasParapetFunnel
-        ? ["Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
+        ? hasSquareParapetFunnel
+          ? ["Воронка парапетная ТехноНИКОЛЬ квадратного сечения с галтелью 100*100*600", "Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
+          : ["Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
         : ["Воронка ТехноНИКОЛЬ", "Воронка кровельная", "Воронка с обжимным фланцем"],
       quantityType: "project",
+      unitCount: funnelUnitCount,
       note: "Количество и тип воронок считать по проекту или калькулятору NAV.TN; в счет ставить только после подтверждения водосборных участков.",
     },
   ];
@@ -412,7 +426,7 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
   if (layer.quantityType === "project") {
     return {
       value: null,
-      text: layer.note ?? "Расход по проекту.",
+      text: layer.unitCount ? `${layer.unitCount} шт по проекту/задаче менеджера; тип воронки сверить по проекту водоотвода.` : layer.note ?? "Расход по проекту.",
     };
   }
 
@@ -513,7 +527,7 @@ export async function POST(request: NextRequest) {
     }
 
     const area = detectRoofArea(extractedText, manualArea);
-    const layers = detectLayers(extractedText);
+    const layers = detectLayers(extractedText, question);
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
     const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
