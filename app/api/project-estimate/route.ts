@@ -121,10 +121,13 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
 }
 
 function detectUnitCount(text: string, keyword: RegExp) {
-  const before = text.match(new RegExp(`${keyword.source}[^\\d]{0,80}(\\d{1,4})\\s*шт`, "i"));
-  if (before?.[1]) return Number(before[1]);
-  const after = text.match(new RegExp(`(\\d{1,4})\\s*шт[^\\n.]{0,80}${keyword.source}`, "i"));
-  if (after?.[1]) return Number(after[1]);
+  const keywordPattern = new RegExp(keyword.source, "i");
+  const unitMatches = Array.from(text.matchAll(/(\d{1,4})\s*шт/gi));
+  for (const match of unitMatches) {
+    const index = match.index ?? 0;
+    const context = text.slice(Math.max(0, index - 160), index + 160);
+    if (keywordPattern.test(context)) return Number(match[1]);
+  }
   return undefined;
 }
 
