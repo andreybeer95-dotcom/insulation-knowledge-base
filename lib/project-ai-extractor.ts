@@ -211,8 +211,75 @@ function normalizeExtraction(raw: unknown, provider: ProjectAiProvider, model: s
   };
 }
 
-function anthropicTextFromResponse(data: { content?: Array<{ type?: string; text?: string }> }) {
+type AnthropicContentItem = {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+};
+
+function anthropicTextFromResponse(data: { content?: AnthropicContentItem[] }) {
   return data.content?.find((item) => item.type === "text")?.text ?? "";
+}
+
+function anthropicToolInputFromResponse(data: { content?: AnthropicContentItem[] }) {
+  return data.content?.find((item) => item.type === "tool_use" && item.name === "extract_roof_project")?.input ?? null;
+}
+
+function buildAnthropicExtractionTool() {
+  const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
+  const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
+
+  return {
+    name: "extract_roof_project",
+    description: "Extract structured roof project facts from a construction PDF. Do not invent product codes or materials.",
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["roofAreaM2", "roofAreaSource", "roofAreaConfidence", "layers", "warnings"],
+      properties: {
+        roofAreaM2: nullableNumber,
+        roofAreaSource: nullableString,
+        roofAreaConfidence: { type: "string", enum: ["high", "medium", "low", "none"] },
+        layers: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "role",
+              "material",
+              "thicknessMm",
+              "areaM2",
+              "layerCount",
+              "quantity",
+              "unit",
+              "quantityType",
+              "projectOnly",
+              "confidence",
+              "sourceText",
+              "note",
+            ],
+            properties: {
+              role: nullableString,
+              material: nullableString,
+              thicknessMm: nullableNumber,
+              areaM2: nullableNumber,
+              layerCount: nullableNumber,
+              quantity: nullableNumber,
+              unit: nullableString,
+              quantityType: { anyOf: [{ type: "string", enum: ["m2", "m3", "шт", "project"] }, { type: "null" }] },
+              projectOnly: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+              confidence: { type: "string", enum: ["high", "medium", "low", "none"] },
+              sourceText: nullableString,
+              note: nullableString,
+            },
+          },
+        },
+        warnings: { type: "array", items: { type: "string" } },
+      },
+    },
+  };
 }
 
 async function getAvailableAnthropicModel(apiKey: string, currentModel: string) {
@@ -236,12 +303,14 @@ async function getAvailableAnthropicModel(apiKey: string, currentModel: string) 
     ?? null;
 }
 
-async function callAnthropic(prompt: string, apiKey: string, model: string): Promise<{ content: string; model: string }> {
+async function callAnthropic(prompt: string, apiKey: string, model: string): Promise<{ content: string; model: string; extraction?: unknown }> {
   const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
   const body = {
     model,
-    max_tokens: 1800,
+    max_tokens: 2200,
     temperature: 0,
+    tools: [buildAnthropicExtractionTool()],
+    tool_choice: { type: "tool", name: "extract_roof_project" },
     messages: [{ role: "user", content: prompt }],
   };
 
@@ -270,14 +339,14 @@ async function callAnthropic(prompt: string, apiKey: string, model: string): Pro
         body: JSON.stringify({ ...body, model: fallbackModel }),
       });
       if (!response.ok) throw new Error(`Anthropic extraction failed: ${response.status} ${await response.text()}`);
-      const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
-      return { content: anthropicTextFromResponse(data), model: fallbackModel };
+      const data = await response.json() as { content?: AnthropicContentItem[] };
+      return { content: anthropicTextFromResponse(data), extraction: anthropicToolInputFromResponse(data), model: fallbackModel };
     }
   }
 
   if (!response.ok) throw new Error(`Anthropic extraction failed: ${response.status} ${await response.text()}`);
-  const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
-  return { content: anthropicTextFromResponse(data), model };
+  const data = await response.json() as { content?: AnthropicContentItem[] };
+  return { content: anthropicTextFromResponse(data), extraction: anthropicToolInputFromResponse(data), model };
 }
 
 async function callOpenAiCompatible(prompt: string, apiKey: string, model: string, provider: "openai" | "openrouter"): Promise<{ content: string; model: string }> {
@@ -328,6 +397,9 @@ export async function extractRoofProjectWithAi(input: ExtractRoofProjectInput): 
     const result = provider === "anthropic"
       ? await callAnthropic(prompt, apiKey, model)
       : await callOpenAiCompatible(prompt, apiKey, model, provider);
+    if ("extraction" in result && result.extraction) {
+      return normalizeExtraction(result.extraction, provider, result.model);
+    }
     const json = extractJsonObject(result.content);
     if (!json) throw new Error("AI extractor returned no JSON object");
     return normalizeExtraction(JSON.parse(json), provider, result.model);
