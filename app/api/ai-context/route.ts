@@ -743,10 +743,13 @@ export async function GET(request: NextRequest) {
         (!thickness || hasBoardThickness(candidate.name, String(thickness)))
     }
     if (/праймер/.test(sourceText)) {
-      return /праймер/.test(candidateText) && !/клей|мастик|герметик/i.test(candidateText)
+      return /праймер/.test(candidateText) &&
+        !/клей|мастик|герметик|кабель|канал|угол|заглуш|плинтус/i.test(candidateText)
     }
     if (/керамзит/.test(sourceText)) {
-      return /керамзит/.test(candidateText)
+      return /керамзит/.test(candidateText) &&
+        /гравий|засыпк|фр\.?|фракц|фасов|биг/i.test(candidateText) &&
+        !/блок|скц|камень|перемыч/i.test(candidateText)
     }
     if (/цпс|пескобетон|цементно-песчан|м-?\s*300|м300/.test(sourceText)) {
       return /цпс|пескобетон|цементно-песчан|м-?\s*300|м300/i.test(candidateText)
@@ -1463,7 +1466,7 @@ export async function GET(request: NextRequest) {
             .from('nomenclature_1c')
             .select('id, code, article, name, brand')
             .in('code', requested_invoice_codes)
-            .limit(requested_invoice_codes.length)
+            .limit(Math.max(40, requested_invoice_codes.length * 4))
         : { data: [] as NomenclatureItem[] }
       const invoiceCodeItems = (invoiceCodeMatch.data ?? []) as NomenclatureItem[]
       const matchedNomenclatureCodes = new Set(invoiceCodeItems.map((item) => item.code).filter(Boolean) as string[])
@@ -1473,7 +1476,7 @@ export async function GET(request: NextRequest) {
             .from('products')
             .select('id, kod_1c, name, category_type, code_1c_parent, revenue_3y, qty_3y, is_active, is_old, manufacturers(name_ru)')
             .in('kod_1c', missingProductCodes)
-            .limit(missingProductCodes.length)
+            .limit(Math.max(40, missingProductCodes.length * 4))
         : { data: [] as any[] }
       const invoiceCodeOrder = new Map(requested_invoice_codes.map((code, index) => [code, index]))
       requested_invoice_items = dedupeNomenclature(
