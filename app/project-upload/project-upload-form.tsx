@@ -65,6 +65,10 @@ type EstimateResponse = {
     calculation: string;
     note: string;
     searchTerms: string[];
+    code?: string | null;
+    material?: string | null;
+    brand?: string | null;
+    alternatives?: Array<{ code: string | null; name: string | null; brand: string | null }>;
   }>;
   textPreview?: string;
 };
@@ -421,6 +425,14 @@ export default function ProjectUploadForm() {
                         <div key={`${item.role}-${item.requestedLayer}`} className="rounded-md bg-slate-50 p-3 text-sm">
                           <div className="font-medium text-slate-800">{item.requestedLayer}</div>
                           <div className="text-slate-500">{item.role}</div>
+                          {item.code && (
+                            <div className="mt-1 text-xs font-semibold text-slate-900">
+                              Код 1С: {item.code}
+                            </div>
+                          )}
+                          {item.material && item.material !== item.requestedLayer && (
+                            <div className="mt-1 text-xs text-slate-600">{item.material}</div>
+                          )}
                           <div className="mt-1 text-xs text-slate-500">{item.calculation}</div>
                           {showNote && <div className="mt-1 text-xs text-amber-700">{item.note}</div>}
                         </div>

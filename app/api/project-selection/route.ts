@@ -27,7 +27,10 @@ function buildCompactSummary(estimate: any) {
   if (estimate?.notFound?.length) {
     lines.push("Требует проверки:");
     for (const item of estimate.notFound) {
-      lines.push(`- ${item.role}: ${item.requestedLayer}`);
+      const code = item.code ? ` | ${item.code}` : "";
+      const material =
+        item.material && item.material !== item.requestedLayer ? ` -> ${item.material}` : "";
+      lines.push(`- ${item.role}: ${item.requestedLayer}${material}${code}`);
     }
   }
   if (estimate?.roofFastenerGuidance?.shouldMention) {

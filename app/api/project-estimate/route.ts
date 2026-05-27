@@ -31,6 +31,18 @@ type InvoiceItem = {
   alternatives: Array<{ code: string | null; name: string | null; brand: string | null }>;
 };
 
+type ReviewItem = {
+  role: string;
+  requestedLayer: string;
+  searchTerms?: string[];
+  calculation: string;
+  note: string;
+  code?: string | null;
+  material?: string | null;
+  brand?: string | null;
+  alternatives?: Array<{ code: string | null; name: string | null; brand: string | null }>;
+};
+
 type QuoteItem = {
   no: number;
   code: string | null;
@@ -1145,7 +1157,7 @@ function buildQuoteDraft(summary: {
   fileName: string;
   area: AreaInfo;
   quoteItems: QuoteItem[];
-  notFound: Array<{ role: string; requestedLayer: string; calculation: string; note: string }>;
+  notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
 }) {
   const lines: string[] = [];
@@ -1160,7 +1172,12 @@ function buildQuoteDraft(summary: {
       lines.push(`${item.no} | ${item.code ?? "код не найден"} | ${item.material ?? "материал не найден"} | ${item.quantity} | ${item.unit} | ${item.calculation}`);
     }
   } else {
-    lines.push("В счет: счетные позиции с кодами 1С автоматически не найдены.");
+    const pendingWithCodes = summary.notFound.filter((item) => item.code);
+    if (pendingWithCodes.length) {
+      lines.push("В счет: счетные позиции не поставлены, потому что не хватает площади/количества. Материалы с кодами ниже в блоке проверки.");
+    } else {
+      lines.push("В счет: счетные позиции с кодами 1С автоматически не найдены.");
+    }
   }
 
   if (summary.notFound.length) {
@@ -1170,7 +1187,10 @@ function buildQuoteDraft(summary: {
       const calculation = item.calculation.replace(/\.$/, "");
       const normalizedNote = item.note?.replace(/\.$/, "");
       const note = normalizedNote && !calculation.includes(normalizedNote) ? ` ${normalizedNote}.` : "";
-      lines.push(`- ${item.role}: ${item.requestedLayer}. ${calculation}.${note}`);
+      const matchedMaterial =
+        item.material && item.material !== item.requestedLayer ? ` -> ${item.material}` : "";
+      const code = item.code ? ` Код 1С: ${item.code}.` : "";
+      lines.push(`- ${item.role}: ${item.requestedLayer}${matchedMaterial}.${code} ${calculation}.${note}`);
     }
   }
 
@@ -1251,7 +1271,7 @@ export async function POST(request: NextRequest) {
     const projectQuery = buildProjectQuery({ direction, question, area, layers });
 
     const invoiceItems: InvoiceItem[] = [];
-    const notFound: Array<{ role: string; requestedLayer: string; searchTerms: string[]; calculation: string; note: string }> = [];
+    const notFound: ReviewItem[] = [];
     const projectOnly: Array<{ role: string; material: string; note?: string }> = [];
 
     for (const layer of layers) {
@@ -1300,6 +1320,14 @@ export async function POST(request: NextRequest) {
           searchTerms: layer.searchTerms,
           calculation: quantity.text,
           note: missingReason,
+          code: primary?.code ?? null,
+          material: primary?.name ?? null,
+          brand: primary?.brand ?? null,
+          alternatives: matches.slice(1).map((item) => ({
+            code: item.code,
+            name: item.name,
+            brand: item.brand,
+          })),
         });
       }
     }
