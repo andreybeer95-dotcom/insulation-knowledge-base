@@ -369,9 +369,18 @@ export async function GET(request: NextRequest) {
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcMembraneQueryForNomenclature =
-    /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl)\b/i.test(rawQuery) &&
+    /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl|fb)\b/i.test(rawQuery) &&
     !hasCylinderQueryForNomenclature &&
     !hasPipelinePvcSystemQuery
+  const hasAdhesivePvcRoofQuery =
+    hasPvcMembraneQueryForNomenclature &&
+    /клей|клеев|прикле|bond|адгез|флис|fleece|fb\b|osb|осп|дерев/i.test(rawQuery)
+  const hasBallastedPvcRoofQuery =
+    hasPvcMembraneQueryForNomenclature &&
+    /балласт|грави|щебен|плитк|террас|эксплуатируем|v[-\s]*gr\b/i.test(rawQuery)
+  const hasMechanicalPvcRoofQuery =
+    hasPvcMembraneQueryForNomenclature &&
+    /механическ|termoclip|термоклип|саморез|телескоп|креп[её]ж|профлист|профилирован|v[-\s]*rp\b/i.test(rawQuery)
   const hasRoofTermoclipQuery =
     (
       /(termoclip|термоклип)/i.test(rawQuery) &&
@@ -520,7 +529,10 @@ export async function GET(request: NextRequest) {
   let nomenclature_accessories: NomenclatureItem[] = []
   let requested_invoice_items: NomenclatureItem[] = []
   let requested_invoice_lines: RequestedInvoiceLine[] = []
+  let requested_invoice_codes: string[] = []
   let missing_invoice_items: RequestedInvoiceLine[] = []
+  const wantsAnalogInQuery =
+    /аналог|замен|альтернатив|вместо|analog|replacement|alternative/i.test(rawQuery)
 
   const getNomenclatureItemType = (name?: string | null) => {
     const lower = (name || '').toLowerCase()
@@ -600,6 +612,15 @@ export async function GET(request: NextRequest) {
     /мембран|plastfoil|пластфойл|logicroof|ecoplast|ecobase|logicbase/i.test(name || '') &&
     !/клей|мастик|праймер|лента|угол|аэратор|усиление|воронк|дорожк|саморез|крепеж|очистител|герметик/i.test(name || '')
 
+  const isFleeceBackedPvcMembrane = (name?: string | null) =>
+    /fb\b|флис|fleece/i.test(name || '')
+
+  const isPlainVgrPvcMembrane = (name?: string | null) =>
+    /v[-\s]*gr\b/i.test(name || '') && !isFleeceBackedPvcMembrane(name)
+
+  const isPlainVrpPvcMembrane = (name?: string | null) =>
+    /v[-\s]*rp\b/i.test(name || '') && !isFleeceBackedPvcMembrane(name)
+
   const hasMembraneThickness = (name: string | null | undefined, thickness: string) => {
     const text = name || ''
     const normalized = thickness.replace('.', ',')
@@ -629,6 +650,19 @@ export async function GET(request: NextRequest) {
       if (/1\s*[,\.]\s*5\s*(?:мм|mm)?/i.test(text)) value -= 8
       if (/1\s*[,\.]\s*2\s*(?:мм|mm)?/i.test(text)) value += 4
       if (/пвх|pvc|мембран/i.test(text)) value -= 5
+      if (hasAdhesivePvcRoofQuery) {
+        if (isFleeceBackedPvcMembrane(text)) value -= 80
+        if (isPlainVrpPvcMembrane(text)) value += 65
+        if (isPlainVgrPvcMembrane(text)) value += 25
+      }
+      if (hasBallastedPvcRoofQuery) {
+        if (isPlainVgrPvcMembrane(text)) value -= 55
+        if (isPlainVrpPvcMembrane(text)) value += 12
+      }
+      if (hasMechanicalPvcRoofQuery) {
+        if (isPlainVrpPvcMembrane(text)) value -= 45
+        if (isFleeceBackedPvcMembrane(text)) value += 35
+      }
       return value
     }
     return [...items].sort((a, b) => {
@@ -655,6 +689,99 @@ export async function GET(request: NextRequest) {
       result.push(item)
     }
     return result
+  }
+
+  const getInvoiceAnalogSearchTerms = (item: NomenclatureItem) => {
+    const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+    const terms: string[] = []
+
+    if (/эпп/.test(text) && /техноэласт|унифлекс|икопал|бикрост|линокром|эласт/.test(text)) {
+      terms.push('ЭПП', 'ИКОПАЛ ЭПП', 'Техноэласт ЭПП', 'Унифлекс ЭПП')
+    }
+    if (/экп/.test(text) && /техноэласт|унифлекс|икопал|бикрост|линокром|эласт/.test(text)) {
+      terms.push('ЭКП', 'ИКОПАЛ ЭКП', 'Техноэласт ЭКП', 'Унифлекс ЭКП')
+    }
+    if (isCleanXpsNomenclature(item)) {
+      terms.push('XPS', 'экструзион', 'CARBON', 'ПЕНОПЛЭКС')
+    }
+    if (/праймер/.test(text)) {
+      terms.push('Праймер')
+    }
+    if (/керамзит/.test(text)) {
+      terms.push('Керамзит')
+    }
+    if (/цпс|пескобетон|цементно-песчан|м-?\s*300|м300/.test(text)) {
+      terms.push('ЦПС', 'Пескобетон', 'М300')
+    }
+    if (/пергамин/.test(text)) {
+      terms.push('Пергамин')
+    }
+    if (isPvcMembraneNomenclature(text)) {
+      terms.push('LOGICROOF', 'ECOPLAST', 'ПВХ мембрана')
+    }
+
+    return terms
+  }
+
+  const isLikelyInvoiceAnalog = (candidate: NomenclatureItem, source: NomenclatureItem) => {
+    const sourceText = `${source.brand || ''} ${source.name || ''}`.toLowerCase()
+    const candidateText = `${candidate.brand || ''} ${candidate.name || ''}`.toLowerCase()
+    if (!candidate.code || candidate.code === source.code) return false
+
+    if (/эпп/.test(sourceText) && /техноэласт|унифлекс|икопал|бикрост|линокром|эласт/.test(sourceText)) {
+      return /эпп/.test(candidateText) &&
+        /техноэласт|унифлекс|икопал|бикрост|линокром|эласт|рулон|наплав/i.test(candidateText) &&
+        !/экп/.test(candidateText)
+    }
+    if (/экп/.test(sourceText) && /техноэласт|унифлекс|икопал|бикрост|линокром|эласт/.test(sourceText)) {
+      return /экп/.test(candidateText) &&
+        /техноэласт|унифлекс|икопал|бикрост|линокром|эласт|рулон|наплав/i.test(candidateText)
+    }
+    if (isCleanXpsNomenclature(source)) {
+      const thickness = getBoardThickness(source.name)
+      return isCleanXpsNomenclature(candidate) &&
+        (!thickness || hasBoardThickness(candidate.name, String(thickness)))
+    }
+    if (/праймер/.test(sourceText)) {
+      return /праймер/.test(candidateText) && !/клей|мастик|герметик/i.test(candidateText)
+    }
+    if (/керамзит/.test(sourceText)) {
+      return /керамзит/.test(candidateText)
+    }
+    if (/цпс|пескобетон|цементно-песчан|м-?\s*300|м300/.test(sourceText)) {
+      return /цпс|пескобетон|цементно-песчан|м-?\s*300|м300/i.test(candidateText)
+    }
+    if (/пергамин/.test(sourceText)) {
+      return /пергамин/.test(candidateText)
+    }
+    if (isPvcMembraneNomenclature(sourceText)) {
+      return isPvcMembraneNomenclature(candidateText)
+    }
+
+    return false
+  }
+
+  const collectInvoiceAnalogCandidates = async (items: NomenclatureItem[]) => {
+    const terms = Array.from(new Set(items.flatMap(getInvoiceAnalogSearchTerms))).slice(0, 16)
+    if (terms.length === 0) return []
+
+    const sourceCodes = new Set(items.map((item) => item.code).filter(Boolean) as string[])
+    const matches = await Promise.all(
+      terms.map((term) =>
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', `%${term}%`)
+          .limit(80)
+      )
+    )
+
+    return dedupeNomenclature(
+      matches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
+    )
+      .filter((item) => item.code && !sourceCodes.has(item.code))
+      .filter((item) => items.some((source) => isLikelyInvoiceAnalog(item, source)))
+      .slice(0, 40)
   }
 
   const isNomenclatureAccessory = (name?: string | null) =>
@@ -757,6 +884,12 @@ export async function GET(request: NextRequest) {
     }
     return result
   }
+
+  const extractRequestedInvoiceCodes = () =>
+    Array.from(new Set(
+      Array.from(rawQuery.matchAll(/\b(?:Ц[БВ]\d{5,9}|ВН\d{5}|\d{8,})\b/gi))
+        .map((match) => match[0].toUpperCase())
+    ))
 
   const enrichNomenclatureWithProductMeta = async (items: NomenclatureItem[]) => {
     const codes = Array.from(new Set(items.map((item) => item.code).filter(Boolean))) as string[]
@@ -1278,6 +1411,7 @@ export async function GET(request: NextRequest) {
     }
 
     requested_invoice_lines = extractRequestedInvoiceLines()
+    requested_invoice_codes = extractRequestedInvoiceCodes()
 
     const requestedInvoiceArticles = new Set<string>(
       requested_invoice_lines.map((line) => line.article)
@@ -1287,20 +1421,40 @@ export async function GET(request: NextRequest) {
       addRequestedInvoiceArticles(requestedInvoiceArticles)
     }
 
-    if (requestedInvoiceArticles.size > 0) {
-      const invoiceMatches = await Promise.all(
-        Array.from(requestedInvoiceArticles).map((article) =>
-          supabase
+    if (requestedInvoiceArticles.size > 0 || requested_invoice_codes.length > 0) {
+      const invoiceMatches = requestedInvoiceArticles.size > 0
+        ? await Promise.all(
+            Array.from(requestedInvoiceArticles).map((article) =>
+              supabase
+                .from('nomenclature_1c')
+                .select('id, code, article, name, brand')
+                .eq('article', article)
+                .limit(1)
+            )
+          )
+        : []
+      const invoiceCodeMatch = requested_invoice_codes.length > 0
+        ? await supabase
             .from('nomenclature_1c')
             .select('id, code, article, name, brand')
-            .eq('article', article)
-            .limit(1)
-        )
-      )
+            .in('code', requested_invoice_codes)
+            .limit(requested_invoice_codes.length)
+        : { data: [] as NomenclatureItem[] }
       requested_invoice_items = dedupeNomenclature(
-        invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
+        [
+          ...invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[]),
+          ...((invoiceCodeMatch.data ?? []) as NomenclatureItem[]),
+        ]
       )
       relinkInvoiceLines()
+
+      if (wantsAnalogInQuery && requested_invoice_codes.length > 0 && requested_invoice_items.length > 0) {
+        const invoiceAnalogCandidates = await collectInvoiceAnalogCandidates(requested_invoice_items)
+        nomenclature_analogs = dedupeNomenclature([
+          ...invoiceAnalogCandidates,
+          ...nomenclature_analogs,
+        ]).slice(0, 40)
+      }
     }
   }
 
@@ -1353,6 +1507,9 @@ export async function GET(request: NextRequest) {
 
     const plastfoilItems = sortPvcMembranes(pvcCandidates.filter(isPlastfoilItem))
     const nonPlastfoilItems = sortPvcMembranes(pvcCandidates.filter((item) => !isPlastfoilItem(item)))
+    const nonPlastfoilMainItems = wantsAnalogForPlastfoil && !hasBallastedPvcRoofQuery
+      ? nonPlastfoilItems.filter((item) => !isPlainVgrPvcMembrane(`${item.brand || ''} ${item.name || ''}`))
+      : nonPlastfoilItems
     const explicitPvcSeriesMatcher = /ecoplast/i.test(rawQuery)
       ? /ecoplast/i
       : /logicroof/i.test(rawQuery)
@@ -1376,7 +1533,7 @@ export async function GET(request: NextRequest) {
       relevant_nomenclature = relevant_nomenclature.filter((item) => !isPvcMembraneNomenclature(item.name))
     } else if (wantsAnalogForPlastfoil) {
       relevant_nomenclature = dedupeNomenclature([
-        ...nonPlastfoilItems,
+        ...nonPlastfoilMainItems,
         ...relevant_nomenclature,
       ]).slice(0, 12)
       nomenclature_analogs = dedupeNomenclature([
@@ -1404,7 +1561,8 @@ export async function GET(request: NextRequest) {
       const wantsBallastedPvcAccessories =
         /балласт|грави|щебен|плитк|террас/i.test(rawQuery)
       const wantsRoofSeparationLayerAccessories =
-        !wantsAdhesivePvcAccessories && !wantsBallastedPvcAccessories
+        /геотекст|разделител|стар|xps|экструзи|пенополистирол|битум|рубероид|техноэласт|унифлекс/i.test(rawQuery) ||
+        (!wantsAdhesivePvcAccessories && !wantsBallastedPvcAccessories)
 
       const preferredAccessoryCodes = [
         ...(wantsRoofSeparationLayerAccessories ? [
@@ -2844,7 +3002,8 @@ export async function GET(request: NextRequest) {
     ? sortRulesForTopic(relevantRules).slice(0, hasConstructionInsulationQueryForContext ? 12 : 20)
     : sortRulesForTopic(allRules.filter(r => r.is_prohibition && topicProhibitionMatches(r))).slice(0, 12);
 
-  const strictInvoiceMode = requested_invoice_lines.length > 0
+  const strictInvoiceMode = requested_invoice_lines.length > 0 || requested_invoice_codes.length > 0
+  const strictInvoiceWantsAnalogs = strictInvoiceMode && wantsAnalogInQuery
 
   const selection_guidance = {
     clarification_needed: false,
@@ -2902,6 +3061,23 @@ export async function GET(request: NextRequest) {
     ]
   }
 
+  if (hasPvcMembraneQueryForContext) {
+    selection_guidance.answer_policy = [
+      'Для ПВХ-кровли сначала определить систему: механическое крепление, клеевая система или балласт, затем основание.',
+      'LOGICROOF V-RP давать основным вариантом для механически закрепляемой кровли. Для клеевого монтажа основным вариантом давать мембрану с флисовой подложкой/FB, например LOGICROOF V-GR FB, если она пришла в контексте.',
+      'LOGICROOF BOND привязывать к клеевой системе с FB/флисом. Не советовать обычный LOGICROOF V-RP под клей без проектного согласования производителя.',
+      'LOGICROOF V-GR без FB рассматривать для балластной/эксплуатируемой кровли по проекту; не писать его как универсальный прямой аналог Пластфойл Classic.',
+      'ПВХ-металл нужен для примыканий и периметра; геотекстиль 200-300 г/м2 проверять при старом основании, XPS или несовместимых слоях.',
+      ...selection_guidance.answer_policy,
+    ]
+    selection_guidance.analog_policy = [
+      'Аналог Пластфойл подбирать по системе: механика -> LOGICROOF/Ecoplast V-RP; клей -> FB/флис; балласт -> V-GR по проекту.',
+      'Если способ монтажа не указан, дать короткую развилку по системам или спросить способ монтажа, а не утверждать один универсальный аналог.',
+      ...selection_guidance.analog_policy,
+    ]
+    selection_guidance.recommendation_status = 'pvc_roof_manager_context'
+  }
+
   if (hasAnySystemQueryForContext) {
     selection_guidance.answer_policy = [
       'Если запрос относится к конкретной системе NAV.TN, отвечать только по составу выбранной системы и проверенным кодам 1С из rules.',
@@ -2943,11 +3119,30 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (hasPvcMembraneQueryForContext && !hasAnySystemQueryForContext && !strictInvoiceMode) {
+    const isPvcCalculationOrSystemRequest =
+      /расчет|рассч|комплект|площад|система|монтаж|кровл|клей|клеев|механическ|балласт|все\s+что\s+нужно|под\s+такой\s+формат/i.test(rawQuery)
+    const hasPvcMountingMode =
+      /механическ|termoclip|термоклип|клей|клеев|bond|балласт|наплавл|самокле|флис|fb\b/i.test(rawQuery)
+    const hasPvcBase =
+      /профлист|профилирован|бетон|ж\/б|цсп|osb|осп|фанер|дерев|стар[а-я\s]+кров|основан|xps|экструзи/i.test(rawQuery)
+
+    if (isPvcCalculationOrSystemRequest && !hasPvcMountingMode) {
+      selection_guidance.questions.push('Уточните способ монтажа ПВХ-кровли: механика, клей или балласт.')
+    }
+    if (isPvcCalculationOrSystemRequest && !hasPvcBase) {
+      selection_guidance.questions.push('Уточните основание под ПВХ-кровлю: профлист, бетон, OSB/дерево, XPS или старое покрытие.')
+    }
+  }
+
   if (strictInvoiceMode) {
     selection_guidance.answer_policy = [
       'Если missing_items не пустой, запрещено писать "все позиции найдены". Писать: "найдено X из Y, проверить: ...".',
       'В счёт включать только позиции из invoice_lines со статусом found или из requested_invoice_items. Нельзя брать код 1С из кандидатов/аналогов для другой строки.',
       'Ненайденную строку не заменять автоматически на другой угол, покрытие, серию или 2 x 45. Любая замена только как кандидат и только после согласования.',
+      ...(strictInvoiceWantsAnalogs
+        ? ['Если менеджер просит аналоги к скопированной таблице КП, сначала вывести исходные найденные позиции с кодами, затем отдельным блоком кандидаты из nomenclature_analogs. Не писать "аналогов нет", если блок analogs не пустой.']
+        : []),
       ...selection_guidance.answer_policy,
     ]
 
@@ -3045,8 +3240,14 @@ export async function GET(request: NextRequest) {
   if (strictInvoiceMode) {
     const foundLines = requested_invoice_lines.filter((line) => line.found_item)
     formattedContext += '\n\n## Строгая проверка строк счета по 1С\n'
-    formattedContext += `Найдено точных строк: ${foundLines.length} из ${requested_invoice_lines.length}.\n`
-    formattedContext += 'Использовать в счете только найденные строки. Если есть ненайденные строки, не писать "все позиции найдены".\n'
+    if (requested_invoice_lines.length > 0) {
+      formattedContext += `Найдено точных строк: ${foundLines.length} из ${requested_invoice_lines.length}.\n`
+      formattedContext += 'Использовать в счете только найденные строки. Если есть ненайденные строки, не писать "все позиции найдены".\n'
+    }
+    if (requested_invoice_codes.length > 0) {
+      formattedContext += `Найдено кодов 1С из запроса: ${requested_invoice_items.length} из ${requested_invoice_codes.length}.\n`
+      formattedContext += 'Если менеджер просит аналоги к этим кодам, исходные позиции не заменять автоматически: аналоги вывести отдельным блоком кандидатов.\n'
+    }
     if (foundLines.length > 0) {
       formattedContext += '\nНайдено:\n'
       formattedContext += foundLines.map((line) => {
@@ -3054,6 +3255,18 @@ export async function GET(request: NextRequest) {
         const qtyPart = line.quantity ? ` | количество: ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
         return `- ${item?.name ?? line.line} | код 1С: ${item?.code ?? '—'} | article: ${line.article}${qtyPart}`
       }).join('\n')
+    }
+    if (requested_invoice_codes.length > 0 && requested_invoice_items.length > 0) {
+      formattedContext += '\n\nНайденные коды из запроса:\n'
+      formattedContext += requested_invoice_items.slice(0, 20).map((item) =>
+        `- ${item.name ?? '—'} | код 1С: ${item.code ?? '—'}${item.article ? ` | article: ${item.article}` : ''}`
+      ).join('\n')
+    }
+    if (strictInvoiceWantsAnalogs && nomenclature_analogs.length > 0) {
+      formattedContext += '\n\nКандидаты в аналоги по найденным кодам:\n'
+      formattedContext += nomenclature_analogs.slice(0, 20).map((item) =>
+        `- ${item.name ?? '—'} | код 1С: ${item.code ?? '—'}`
+      ).join('\n')
     }
     if (missing_invoice_items.length > 0) {
       formattedContext += '\n\nПроверить, точный код 1С не найден:\n'
@@ -3113,12 +3326,22 @@ export async function GET(request: NextRequest) {
     ? [
         '',
         '## Строгая проверка строк счета',
-        `- Найдено точных строк: ${foundInvoiceLines.length} из ${requested_invoice_lines.length}.`,
+        ...(requested_invoice_lines.length > 0
+          ? [`- Найдено точных строк: ${foundInvoiceLines.length} из ${requested_invoice_lines.length}.`]
+          : []),
+        ...(requested_invoice_codes.length > 0
+          ? [`- Найдено кодов 1С из запроса: ${requested_invoice_items.length} из ${requested_invoice_codes.length}.`]
+          : []),
         ...foundInvoiceLines.slice(0, 8).map((line) => {
           const item = line.found_item
           const qtyPart = line.quantity ? ` | ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
           return `- Найдено: ${item?.name ?? line.line} (код 1С: ${item?.code ?? '-'} | article: ${line.article}${qtyPart})`
         }),
+        ...(requested_invoice_codes.length > 0
+          ? requested_invoice_items.slice(0, 8).map((item) =>
+              `- Код из запроса: ${item.name ?? '—'} (код 1С: ${item.code ?? '-'}${item.article ? ` | article: ${item.article}` : ''})`
+            )
+          : []),
         ...missing_invoice_items.slice(0, 8).map((line) => {
           const qtyPart = line.quantity ? ` | ${line.quantity}${line.unit ? ` ${line.unit}` : ''}` : ''
           return `- Проверить: ${line.line} (точный код 1С не найден | expected_article: ${line.article}${qtyPart})`
@@ -3161,7 +3384,9 @@ export async function GET(request: NextRequest) {
     '',
     '## Сопутствующие',
     ...(strictInvoiceMode
-      ? ['- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
+      ? [strictInvoiceWantsAnalogs
+          ? '- Аналоги выводить только из блока analogs отдельными кандидатами; сопутствующие сверх запроса не добавлять без согласования.'
+          : '- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
       : hasAnySystemQueryForContext
       ? ['- Сопутствующие брать из состава выбранной системы в rules; не добавлять общее из поиска.']
       : nomenclature_accessories.length > 0
@@ -3197,6 +3422,13 @@ export async function GET(request: NextRequest) {
             : []),
           '- По минвате первым BASWOOL, вторым ROCKWOOL; ТЕХНОНИКОЛЬ по минвате не ставить первым.',
           '- Для вентфасада проверить мембрану и фасадный крепеж; Силму не ставить основным вариантом.',
+        ]
+      : hasPvcMembraneQueryForContext
+      ? [
+          '- LOGICROOF V-RP = основной вариант для механического крепления; под клей не советовать без проектного согласования.',
+          '- Для клеевой ПВХ-кровли основным вариантом давать мембрану FB/с флисом и клей LOGICROOF BOND только к этой системе.',
+          '- LOGICROOF V-GR без FB рассматривать для балласта/эксплуатируемой кровли по проекту, не как универсальный аналог Пластфойл.',
+          '- Если запрошены аналоги к таблице КП, брать их только из блока analogs с кодами 1С.',
         ]
       : [
           '- XOTPIPE без покрытия + оцинкованная окожушка O-ME-ZN допустимо.',
@@ -3268,6 +3500,7 @@ export async function GET(request: NextRequest) {
         unit: line.unit,
         reason: 'exact_article_not_found',
       })),
+      requested_invoice_codes,
       requested_invoice_items: requested_invoice_items.slice(0, 8).map((item) => ({
         code: item.code,
         article: item.article,
@@ -3307,6 +3540,7 @@ export async function GET(request: NextRequest) {
         accessories_count: nomenclature_accessories.length,
         strict_invoice: strictInvoiceMode,
         invoice_lines_count: requested_invoice_lines.length,
+        invoice_codes_count: requested_invoice_codes.length,
         missing_items_count: missing_invoice_items.length,
         rules_count: compactRules.length,
         chunks_count: compactChunks.length,
@@ -3330,6 +3564,7 @@ export async function GET(request: NextRequest) {
     nomenclature_analogs,
     nomenclature_accessories,
     invoice_lines: requested_invoice_lines,
+    requested_invoice_codes,
     missing_items: missing_invoice_items.map((line) => ({
       line: line.line,
       expected_article: line.article,
@@ -3351,6 +3586,7 @@ export async function GET(request: NextRequest) {
       requested_invoice_items_count: requested_invoice_items.length,
       strict_invoice: strictInvoiceMode,
       invoice_lines_count: requested_invoice_lines.length,
+      invoice_codes_count: requested_invoice_codes.length,
       missing_items_count: missing_invoice_items.length,
       clarification_needed: selection_guidance.clarification_needed,
       rules_count:    applicable_rules.length,

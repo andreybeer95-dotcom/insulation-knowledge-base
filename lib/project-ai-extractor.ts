@@ -106,6 +106,7 @@ function collectWindows(text: string, patterns: RegExp[], radius = 2200) {
 }
 
 function selectRoofExtractionText(text: string) {
+  const maxChars = Number(process.env.PROJECT_AI_CONTEXT_CHARS ?? 18000);
   const patterns = [
     /площадь\s+(?:кровли|покрытия|застройки)/gi,
     /спецификац[а-я\s-]*(?:кров|покрыт|ворон)/gi,
@@ -120,15 +121,15 @@ function selectRoofExtractionText(text: string) {
   ];
 
   const windows = collectWindows(text, patterns);
-  if (!windows.length) return text.slice(0, 18000);
+  if (!windows.length) return text.slice(0, maxChars);
 
   let result = "";
   for (const window of windows) {
     const next = compactSnippet(text.slice(window.start, window.end));
-    if (result.length + next.length > 26000) break;
+    if (result.length + next.length > maxChars) break;
     result += `${result ? "\n\n---\n\n" : ""}${next}`;
   }
-  return result || text.slice(0, 18000);
+  return result || text.slice(0, maxChars);
 }
 
 function buildPrompt(input: ExtractRoofProjectInput) {
@@ -272,7 +273,7 @@ function buildAnthropicExtractionTool() {
 }
 
 async function getAvailableAnthropicModel(apiKey: string, currentModel: string) {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
   const response = await fetch("https://api.anthropic.com/v1/models", {
     method: "GET",
     signal: AbortSignal.timeout(timeoutMs),
@@ -293,7 +294,7 @@ async function getAvailableAnthropicModel(apiKey: string, currentModel: string) 
 }
 
 async function callAnthropic(prompt: string, apiKey: string, model: string): Promise<{ content: string; model: string; extraction?: unknown }> {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
   const body = {
     model,
     max_tokens: 2200,
@@ -339,7 +340,7 @@ async function callAnthropic(prompt: string, apiKey: string, model: string): Pro
 }
 
 async function callOpenAiCompatible(prompt: string, apiKey: string, model: string, provider: "openai" | "openrouter"): Promise<{ content: string; model: string }> {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
   const url = provider === "openrouter"
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.openai.com/v1/chat/completions";
@@ -359,6 +360,7 @@ async function callOpenAiCompatible(prompt: string, apiKey: string, model: strin
     body: JSON.stringify({
       model,
       temperature: 0,
+      max_tokens: 2200,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: "Ты извлекаешь структурированные факты из строительных PDF. Отвечай только JSON." },
