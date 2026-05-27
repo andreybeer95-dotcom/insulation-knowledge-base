@@ -137,6 +137,7 @@ function buildPrompt(input: ExtractRoofProjectInput) {
     "Ты извлекаешь факты из PDF строительного проекта для предварительного расчета материалов.",
     "Верни ТОЛЬКО JSON без Markdown.",
     "Не подбирай и не выдумывай коды 1С. Не добавляй материалы, которых нет в тексте.",
+    "IMPORTANT: roofAreaSource and every layer.sourceText MUST be an exact substring copied from the PDF fragments below. If you cannot quote the exact text that contains the area/material, return null or skip the layer.",
     "Если площадь/толщина/количество не указаны явно, ставь null и confidence low/none.",
     "Для кровли отдельно выделяй разные типы кровли, слои пирога, площади, толщины, воронки и водосток.",
     "Если в тексте есть LOGICROOF, ТЕХНОРУФ, LOGICPIR, XPS/CARBON, Технобарьер, Унифлекс, Техноэласт, воронки или водосток, обязательно верни их в layers. Пустой layers допустим только если кровельных материалов в тексте нет.",

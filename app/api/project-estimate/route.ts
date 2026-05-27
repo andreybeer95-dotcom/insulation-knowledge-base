@@ -548,6 +548,72 @@ function shouldRunAiExtraction(input: {
   return questionAsksAi || weakArea || weakLayers || onlyProjectLayers || missingPvcThickness;
 }
 
+function normalizeGroundingText(text: string | null | undefined) {
+  return (text ?? "")
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasGroundedSnippet(pdfText: string, sourceText: string | null | undefined) {
+  const source = normalizeGroundingText(sourceText);
+  if (source.length < 12) return false;
+  const pdf = normalizeGroundingText(pdfText);
+  if (pdf.includes(source)) return true;
+  const sourceWords = source.split(" ").filter((word) => word.length >= 4);
+  if (sourceWords.length < 3) return false;
+  return sourceWords.filter((word) => pdf.includes(word)).length >= Math.min(sourceWords.length, 6);
+}
+
+function layerMaterialTokens(layer: ProjectAiLayer) {
+  return normalizeGroundingText(`${layer.material ?? ""} ${layer.role ?? ""}`)
+    .split(" ")
+    .filter((word) => word.length >= 4 && !/^\d+$/.test(word));
+}
+
+function isGroundedAiLayer(layer: ProjectAiLayer, pdfText: string) {
+  if (!hasGroundedSnippet(pdfText, layer.sourceText)) return false;
+  const source = normalizeGroundingText(layer.sourceText);
+  const tokens = layerMaterialTokens(layer);
+  if (!tokens.length) return false;
+  return tokens.some((token) => source.includes(token));
+}
+
+type SuccessfulProjectAiExtraction = Extract<ProjectAiExtraction, { status: "ok" }>;
+
+function isGroundedAiArea(extraction: SuccessfulProjectAiExtraction, pdfText: string) {
+  if (!extraction.roofAreaM2 || extraction.roofAreaM2 <= 0) return false;
+  if (!hasGroundedSnippet(pdfText, extraction.roofAreaSource)) return false;
+  const source = normalizeGroundingText(extraction.roofAreaSource);
+  const areaText = String(Math.round(extraction.roofAreaM2));
+  const hasAreaNumber = source.includes(areaText) || source.includes(String(extraction.roofAreaM2).replace(".", " "));
+  return hasAreaNumber && /кров|roof|покрыт|площад/.test(source);
+}
+
+function groundAiExtraction(extraction: ProjectAiExtraction, pdfText: string): ProjectAiExtraction {
+  if (extraction.status !== "ok") return extraction;
+
+  const layers = extraction.layers.filter((layer) => isGroundedAiLayer(layer, pdfText));
+  const rejectedLayers = extraction.layers.length - layers.length;
+  const groundedArea = isGroundedAiArea(extraction, pdfText);
+  const warnings = [
+    ...extraction.warnings,
+    ...(rejectedLayers > 0 ? [`Rejected ${rejectedLayers} AI layer(s) without exact PDF grounding.`] : []),
+    ...(!groundedArea && extraction.roofAreaM2 ? ["Rejected AI roof area without exact PDF grounding."] : []),
+  ];
+
+  return {
+    ...extraction,
+    roofAreaM2: groundedArea ? extraction.roofAreaM2 : null,
+    roofAreaSource: groundedArea ? extraction.roofAreaSource : null,
+    roofAreaConfidence: groundedArea ? extraction.roofAreaConfidence : "none",
+    layers,
+    warnings,
+  };
+}
+
 function parseAiThickness(text: string) {
   const match = text.match(/(\d{1,3}(?:[,.]\d)?)\s*(?:мм|mm)/i);
   return match?.[1] ? toNumber(match[1]) : undefined;
@@ -1246,22 +1312,25 @@ export async function POST(request: NextRequest) {
       direction,
       shouldRun: shouldRunAi,
     });
+    const groundedAiExtraction = aiExtraction.status === "ok"
+      ? groundAiExtraction(aiExtraction, extractedText)
+      : aiExtraction;
 
-    if (aiExtraction.status === "ok") {
-      const aiLayers = buildAiDetectedLayers(aiExtraction);
+    if (groundedAiExtraction.status === "ok") {
+      const aiLayers = buildAiDetectedLayers(groundedAiExtraction);
       layers = mergeDetectedLayers(layers, aiLayers);
 
       if (
-        aiExtraction.roofAreaM2 &&
-        aiExtraction.roofAreaM2 > 0 &&
-        aiExtraction.roofAreaConfidence !== "none" &&
+        groundedAiExtraction.roofAreaM2 &&
+        groundedAiExtraction.roofAreaM2 > 0 &&
+        groundedAiExtraction.roofAreaConfidence !== "none" &&
         (area.source === "not_found" || area.source === "axes_estimate" || area.confidence === "low")
       ) {
         area = {
-          value: round(aiExtraction.roofAreaM2, 2),
+          value: round(groundedAiExtraction.roofAreaM2, 2),
           source: "pdf_text",
-          confidence: aiExtraction.roofAreaConfidence === "high" ? "high" : "medium",
-          note: `Площадь кровли извлечена AI-экстрактором из PDF. ${aiExtraction.roofAreaSource ?? "Перед счетом сверить с ведомостью/планом кровли."}`,
+          confidence: groundedAiExtraction.roofAreaConfidence === "high" ? "high" : "medium",
+          note: `Площадь кровли извлечена AI-экстрактором из PDF. ${groundedAiExtraction.roofAreaSource ?? "Перед счетом сверить с ведомостью/планом кровли."}`,
         };
       }
     }
@@ -1368,7 +1437,7 @@ export async function POST(request: NextRequest) {
         unitCount: layer.unitCount ?? null,
         note: layer.note ?? null,
       })),
-      aiExtraction,
+      aiExtraction: groundedAiExtraction,
       invoiceItems,
       quoteItems,
       quoteDraft,
