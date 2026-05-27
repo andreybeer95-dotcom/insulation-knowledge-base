@@ -784,6 +784,25 @@ export async function GET(request: NextRequest) {
       .slice(0, 40)
   }
 
+  const productCodeRowsToNomenclatureItems = (rows: any[]): NomenclatureItem[] =>
+    rows.map((row) => {
+      const mfrRaw = row?.manufacturers
+      const mfr = (Array.isArray(mfrRaw) ? mfrRaw[0] : mfrRaw)?.name_ru ?? null
+      return {
+        id: String(row.id),
+        code: row.kod_1c ?? null,
+        article: null,
+        name: row.name ?? null,
+        brand: mfr,
+        product_category_type: row.category_type ?? null,
+        code_1c_parent: row.code_1c_parent ?? null,
+        revenue_3y: row.revenue_3y === null || row.revenue_3y === undefined ? null : Number(row.revenue_3y),
+        qty_3y: row.qty_3y === null || row.qty_3y === undefined ? null : Number(row.qty_3y),
+        is_active: row.is_active ?? null,
+        is_old: row.is_old ?? null,
+      }
+    })
+
   const isNomenclatureAccessory = (name?: string | null) =>
     ['end_cap', 'elbow', 'tee', 'transition', 'segment'].includes(getNomenclatureItemType(name))
 
@@ -1440,10 +1459,21 @@ export async function GET(request: NextRequest) {
             .in('code', requested_invoice_codes)
             .limit(requested_invoice_codes.length)
         : { data: [] as NomenclatureItem[] }
+      const invoiceCodeItems = (invoiceCodeMatch.data ?? []) as NomenclatureItem[]
+      const matchedNomenclatureCodes = new Set(invoiceCodeItems.map((item) => item.code).filter(Boolean) as string[])
+      const missingProductCodes = requested_invoice_codes.filter((code) => !matchedNomenclatureCodes.has(code))
+      const invoiceProductCodeMatch = missingProductCodes.length > 0
+        ? await supabase
+            .from('products')
+            .select('id, kod_1c, name, category_type, code_1c_parent, revenue_3y, qty_3y, is_active, is_old, manufacturers(name_ru)')
+            .in('kod_1c', missingProductCodes)
+            .limit(missingProductCodes.length)
+        : { data: [] as any[] }
       requested_invoice_items = dedupeNomenclature(
         [
           ...invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[]),
-          ...((invoiceCodeMatch.data ?? []) as NomenclatureItem[]),
+          ...invoiceCodeItems,
+          ...productCodeRowsToNomenclatureItems(invoiceProductCodeMatch.data ?? []),
         ]
       )
       relinkInvoiceLines()
