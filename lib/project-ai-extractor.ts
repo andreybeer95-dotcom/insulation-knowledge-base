@@ -211,9 +211,41 @@ function normalizeExtraction(raw: unknown, provider: ProjectAiProvider, model: s
   };
 }
 
-async function callAnthropic(prompt: string, apiKey: string, model: string) {
+function anthropicTextFromResponse(data: { content?: Array<{ type?: string; text?: string }> }) {
+  return data.content?.find((item) => item.type === "text")?.text ?? "";
+}
+
+async function getAvailableAnthropicModel(apiKey: string, currentModel: string) {
   const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("https://api.anthropic.com/v1/models", {
+    method: "GET",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+  });
+  if (!response.ok) return null;
+
+  const data = await response.json() as { data?: Array<{ id?: string }> };
+  const modelIds = data.data?.map((item) => item.id).filter((id): id is string => Boolean(id)) ?? [];
+  return modelIds.find((id) => id === currentModel)
+    ?? modelIds.find((id) => /haiku/i.test(id))
+    ?? modelIds.find((id) => /claude/i.test(id))
+    ?? modelIds[0]
+    ?? null;
+}
+
+async function callAnthropic(prompt: string, apiKey: string, model: string): Promise<{ content: string; model: string }> {
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
+  const body = {
+    model,
+    max_tokens: 1800,
+    temperature: 0,
+    messages: [{ role: "user", content: prompt }],
+  };
+
+  let response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     signal: AbortSignal.timeout(timeoutMs),
     headers: {
@@ -221,20 +253,34 @@ async function callAnthropic(prompt: string, apiKey: string, model: string) {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1800,
-      temperature: 0,
-      messages: [{ role: "user", content: prompt }],
-    }),
+    body: JSON.stringify(body),
   });
+
+  if (response.status === 404) {
+    const fallbackModel = await getAvailableAnthropicModel(apiKey, model);
+    if (fallbackModel && fallbackModel !== model) {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({ ...body, model: fallbackModel }),
+      });
+      if (!response.ok) throw new Error(`Anthropic extraction failed: ${response.status} ${await response.text()}`);
+      const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
+      return { content: anthropicTextFromResponse(data), model: fallbackModel };
+    }
+  }
 
   if (!response.ok) throw new Error(`Anthropic extraction failed: ${response.status} ${await response.text()}`);
   const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
-  return data.content?.find((item) => item.type === "text")?.text ?? "";
+  return { content: anthropicTextFromResponse(data), model };
 }
 
-async function callOpenAiCompatible(prompt: string, apiKey: string, model: string, provider: "openai" | "openrouter") {
+async function callOpenAiCompatible(prompt: string, apiKey: string, model: string, provider: "openai" | "openrouter"): Promise<{ content: string; model: string }> {
   const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 35000);
   const url = provider === "openrouter"
     ? "https://openrouter.ai/api/v1/chat/completions"
@@ -265,7 +311,7 @@ async function callOpenAiCompatible(prompt: string, apiKey: string, model: strin
 
   if (!response.ok) throw new Error(`${provider} extraction failed: ${response.status} ${await response.text()}`);
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content ?? "";
+  return { content: data.choices?.[0]?.message?.content ?? "", model };
 }
 
 export async function extractRoofProjectWithAi(input: ExtractRoofProjectInput): Promise<ProjectAiExtraction> {
@@ -279,12 +325,12 @@ export async function extractRoofProjectWithAi(input: ExtractRoofProjectInput): 
 
   try {
     const prompt = buildPrompt(input);
-    const content = provider === "anthropic"
+    const result = provider === "anthropic"
       ? await callAnthropic(prompt, apiKey, model)
       : await callOpenAiCompatible(prompt, apiKey, model, provider);
-    const json = extractJsonObject(content);
+    const json = extractJsonObject(result.content);
     if (!json) throw new Error("AI extractor returned no JSON object");
-    return normalizeExtraction(JSON.parse(json), provider, model);
+    return normalizeExtraction(JSON.parse(json), provider, result.model);
   } catch (error) {
     return {
       status: "failed",
