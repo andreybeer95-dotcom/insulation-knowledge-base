@@ -1904,7 +1904,9 @@ export async function GET(request: NextRequest) {
 
     const cleanXpsAnalogs = nomenclature_analogs.filter(isCleanXpsNomenclature)
     if (cleanXpsAnalogs.length > 0) {
-      nomenclature_analogs = dedupeNomenclature(cleanXpsAnalogs).slice(0, 20)
+      nomenclature_analogs = requested_invoice_codes.length > 0 && wantsAnalogInQuery
+        ? dedupeNomenclature(nomenclature_analogs).slice(0, 40)
+        : dedupeNomenclature(cleanXpsAnalogs).slice(0, 20)
     }
   }
 
