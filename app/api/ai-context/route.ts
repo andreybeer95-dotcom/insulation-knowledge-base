@@ -776,12 +776,18 @@ export async function GET(request: NextRequest) {
       )
     )
 
-    return dedupeNomenclature(
+    const candidates = dedupeNomenclature(
       matches.flatMap((result) => (result.data ?? []) as NomenclatureItem[])
     )
       .filter((item) => item.code && !sourceCodes.has(item.code))
-      .filter((item) => items.some((source) => isLikelyInvoiceAnalog(item, source)))
-      .slice(0, 40)
+
+    const balancedBySource = items.flatMap((source) =>
+      candidates
+        .filter((item) => isLikelyInvoiceAnalog(item, source))
+        .slice(0, 4)
+    )
+
+    return dedupeNomenclature(balancedBySource).slice(0, 40)
   }
 
   const productCodeRowsToNomenclatureItems = (rows: any[]): NomenclatureItem[] =>
@@ -1469,12 +1475,15 @@ export async function GET(request: NextRequest) {
             .in('kod_1c', missingProductCodes)
             .limit(missingProductCodes.length)
         : { data: [] as any[] }
+      const invoiceCodeOrder = new Map(requested_invoice_codes.map((code, index) => [code, index]))
       requested_invoice_items = dedupeNomenclature(
         [
           ...invoiceMatches.flatMap((result) => (result.data ?? []) as NomenclatureItem[]),
           ...invoiceCodeItems,
           ...productCodeRowsToNomenclatureItems(invoiceProductCodeMatch.data ?? []),
         ]
+      ).sort((a, b) =>
+        (invoiceCodeOrder.get(a.code || '') ?? 9999) - (invoiceCodeOrder.get(b.code || '') ?? 9999)
       )
       relinkInvoiceLines()
 
@@ -3404,7 +3413,7 @@ export async function GET(request: NextRequest) {
       ? [
           '',
           '## Аналоги / запрошенный вариант',
-          ...nomenclature_analogs.slice(0, 6).map((n) => {
+          ...nomenclature_analogs.slice(0, strictInvoiceWantsAnalogs ? 20 : 6).map((n) => {
             const codePart = n.code ? `код 1С: ${n.code}` : 'код 1С: —'
             const categoryPart = n.product_category_type ? ` | группа: ${n.product_category_type}` : ''
             return `- **${n.name ?? '—'}** (${codePart}${categoryPart})`
@@ -3547,7 +3556,7 @@ export async function GET(request: NextRequest) {
         category_type: item.product_category_type,
         parent_code: item.code_1c_parent,
       })),
-      analogs: nomenclature_analogs.slice(0, 6).map((item) => ({
+      analogs: nomenclature_analogs.slice(0, strictInvoiceWantsAnalogs ? 20 : 6).map((item) => ({
         code: item.code,
         article: item.article,
         name: item.name,
