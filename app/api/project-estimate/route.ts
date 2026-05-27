@@ -765,13 +765,52 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
   }).filter((layer): layer is DetectedLayer => layer !== null);
 }
 
+function layerFamily(layer: DetectedLayer) {
+  const key = layer.key.toLowerCase();
+  const text = `${layer.role} ${layer.label}`.toLowerCase();
+
+  if (key === "pvc_logicroof_vrp") return "pvc_logicroof_vrp";
+  if (key === "technobarrier") return "technobarrier";
+  if (key === "uniflex_epp") return "uniflex_epp";
+  if (key === "technoelast_epp") return "technoelast_epp";
+  if (key === "technoelast_ekp") return "technoelast_ekp";
+  if (key === "pergamin") return "pergamin";
+  if (key === "primer_08") return "primer_08";
+  if (key.includes("logicpir_slope") || text.includes("logicpir slope")) return "logicpir_slope";
+  if (key.includes("roof_funnel") || text.includes("воронк")) return "roof_funnel";
+  if (key.includes("logicpir_prof") || text.includes("logicpir prof")) return `logicpir_prof_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
+  if (key.includes("technoruf") || text.includes("техноруф")) return `technoruf_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
+  if (key.includes("xps") || text.includes("xps") || text.includes("carbon")) return `xps_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
+
+  return null;
+}
+
+function isCountableLayer(layer: DetectedLayer) {
+  return !layer.projectOnly && layer.quantityType !== "project" && layer.searchTerms.length > 0;
+}
+
 function mergeDetectedLayers(baseLayers: DetectedLayer[], aiLayers: DetectedLayer[]) {
   const merged = new Map<string, DetectedLayer>();
   for (const layer of baseLayers) merged.set(layer.key, layer);
+  const baseFamilies = new Set(baseLayers.map(layerFamily).filter((family): family is string => Boolean(family)));
+  const hasStrongBaseline = baseLayers.filter(isCountableLayer).length >= 2;
+
   for (const aiLayer of aiLayers) {
     const existing = merged.get(aiLayer.key);
     if (!existing) {
+      const family = layerFamily(aiLayer);
+      if (family && baseFamilies.has(family)) continue;
+
+      const isUnsafeAiOnlyCalculation =
+        hasStrongBaseline &&
+        aiLayer.key.startsWith("ai_") &&
+        isCountableLayer(aiLayer) &&
+        !aiLayer.areaOverride &&
+        !aiLayer.unitCount;
+      if (isUnsafeAiOnlyCalculation) continue;
+
       merged.set(aiLayer.key, aiLayer);
+      if (family) baseFamilies.add(family);
       continue;
     }
 
