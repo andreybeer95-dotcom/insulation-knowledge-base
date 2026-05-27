@@ -887,8 +887,8 @@ export async function GET(request: NextRequest) {
 
   const extractRequestedInvoiceCodes = () =>
     Array.from(new Set(
-      Array.from(rawQuery.matchAll(/\b(?:Ц[БВ]\d{5,9}|ВН\d{5}|\d{8,})\b/gi))
-        .map((match) => match[0].toUpperCase())
+      Array.from(rawQuery.matchAll(/(?:^|[^\dA-Za-zА-Яа-я_])((?:Ц[БВ]\d{5,9}|ВН\d{5}|\d{8,}))(?![\dA-Za-zА-Яа-я_])/gi))
+        .map((match) => match[1].toUpperCase())
     ))
 
   const enrichNomenclatureWithProductMeta = async (items: NomenclatureItem[]) => {
