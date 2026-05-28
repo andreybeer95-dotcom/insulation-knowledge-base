@@ -600,11 +600,35 @@ export async function GET(request: NextRequest) {
     const text = name || ''
     const patterns = [
       new RegExp(`\\d{3,4}\\s*[xх*]\\s*${thickness}\\s*(мм|\\)|\\s|,|$)`, 'i'),
+      new RegExp(`\\d{3,4}\\s*[xх*]\\s*\\d{3,4}\\s*[xх*]\\s*${thickness}(\\D|$)`, 'i'),
       new RegExp(`(^|\\D)${thickness}\\s*(мм|$)`, 'i'),
       new RegExp(`(^|\\D)${thickness}\\s*[xх*]\\s*\\d{3,4}\\s*[xх*]\\s*\\d{3,4}(\\D|$)`, 'i'),
       new RegExp(`(^|\\D)\\d+\\s*\\/\\s*${thickness}\\s*[xх*]\\s*\\d{3,4}`, 'i'),
     ]
     return patterns.some((pattern) => pattern.test(text))
+  }
+
+  const sortXpsNomenclature = (items: NomenclatureItem[]) => {
+    const score = (item: NomenclatureItem) => {
+      const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+      let value = 100
+      if (/технониколь|carbon|карбон/i.test(text)) value -= 80
+      if (/carbon\s+eco|карбон\s+эко/i.test(text)) value -= 30
+      if (/carbon\s+prof|карбон\s+проф/i.test(text)) value -= 20
+      if (/фундамент|foundation|geo|гео/i.test(text)) value -= 12
+      if (/пенопл[еэ]кс/i.test(text)) value += 10
+      if (/ravatherm/i.test(text)) value += 20
+      if (/primaplex/i.test(text)) value += 30
+      if (/fas|фасад/i.test(text)) value += 25
+      if (/sp|шведск/i.test(text)) value += 18
+      if (/100(?:\s*мм|-l|\D|$)/i.test(text)) value -= 8
+      return value
+    }
+    return [...items].sort((a, b) => {
+      const scoreDiff = score(a) - score(b)
+      if (scoreDiff !== 0) return scoreDiff
+      return (a.name || '').localeCompare(b.name || '', 'ru')
+    })
   }
 
   const isPvcMembraneNomenclature = (name?: string | null) =>
@@ -1259,8 +1283,10 @@ export async function GET(request: NextRequest) {
       relevant_nomenclature = broadNomenclature
         .filter(matchesSpecialQuery)
         .filter((item) => item.code !== 'ЦБ50593')
-      relevant_nomenclature = dedupeNomenclature(relevant_nomenclature)
-        .slice(0, 20)
+      relevant_nomenclature = (hasXpsInQuery
+        ? sortXpsNomenclature(dedupeNomenclature(relevant_nomenclature))
+        : dedupeNomenclature(relevant_nomenclature)
+      ).slice(0, 20)
 
       const relevantSpecialIds = new Set(relevant_nomenclature.map((item) => item.id))
       nomenclature_analogs = broadNomenclature
@@ -1283,8 +1309,10 @@ export async function GET(request: NextRequest) {
           return false
         })
         .filter((item) => !nomBrand || item.brand !== nomBrand)
-      nomenclature_analogs = dedupeNomenclature(nomenclature_analogs)
-        .slice(0, 20)
+      nomenclature_analogs = (hasXpsInQuery
+        ? sortXpsNomenclature(dedupeNomenclature(nomenclature_analogs))
+        : dedupeNomenclature(nomenclature_analogs)
+      ).slice(0, 20)
     }
 
     if (requestedSizeNumbers.length >= 2) {
@@ -1538,6 +1566,39 @@ export async function GET(request: NextRequest) {
       pvcCandidates = pvcCandidates.filter((item) =>
         requestedPvcThicknesses.some((thickness) => hasMembraneThickness(item.name, thickness))
       )
+    }
+
+    const preferredPvcCodes = [
+      ...(/logicroof|v[-\s]*rp/i.test(rawQuery) ? [
+        'ЦБ15452',
+        'ЦВ000009750',
+        'ЦВ000227732',
+      ] : []),
+      ...(hasAdhesivePvcRoofQuery || /клей|клеев|bond|флис|fleece|fb\b/i.test(rawQuery) ? [
+        'ЦВ000225846',
+        'ЦВ000243380',
+        'ЦВ000221632',
+      ] : []),
+    ]
+
+    if (preferredPvcCodes.length > 0) {
+      const { data: preferredPvcByCode } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .in('code', preferredPvcCodes)
+        .limit(40)
+
+      const preferredPvcItems = ((preferredPvcByCode ?? []) as NomenclatureItem[])
+        .filter((item) => isPvcMembraneNomenclature(item.name))
+        .filter((item) =>
+          requestedPvcThicknesses.length === 0 ||
+          requestedPvcThicknesses.some((thickness) => hasMembraneThickness(item.name, thickness))
+        )
+
+      pvcCandidates = dedupeNomenclature([
+        ...preferredPvcItems,
+        ...pvcCandidates,
+      ])
     }
 
     const isPlastfoilItem = (item: NomenclatureItem) =>
@@ -1902,14 +1963,14 @@ export async function GET(request: NextRequest) {
   if (/xps|экструз|пенопл[еэ]кс|penoplex|техноплекс|carbon/i.test(rawQuery)) {
     const cleanXpsItems = relevant_nomenclature.filter(isCleanXpsNomenclature)
     if (cleanXpsItems.length > 0) {
-      relevant_nomenclature = dedupeNomenclature(cleanXpsItems).slice(0, 12)
+      relevant_nomenclature = sortXpsNomenclature(dedupeNomenclature(cleanXpsItems)).slice(0, 12)
     }
 
     const cleanXpsAnalogs = nomenclature_analogs.filter(isCleanXpsNomenclature)
     if (cleanXpsAnalogs.length > 0) {
       nomenclature_analogs = requested_invoice_codes.length > 0 && wantsAnalogInQuery
         ? dedupeNomenclature(nomenclature_analogs).slice(0, 40)
-        : dedupeNomenclature(cleanXpsAnalogs).slice(0, 20)
+        : sortXpsNomenclature(dedupeNomenclature(cleanXpsAnalogs)).slice(0, 20)
     }
   }
 
