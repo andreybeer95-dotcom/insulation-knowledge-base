@@ -434,6 +434,9 @@ export async function GET(request: NextRequest) {
         /(?:^|\s)r\s*28\s*\/\s*(70|110)\b/i.test(rawQuery)
       )
     )
+  const hasRoofFunnelQueryForNomenclature =
+    /воронк|водоотвод|водосточ|geberit|pluvia|геберит|плювиа|vortex|wigar|вфо/i.test(rawQuery) &&
+    /кровл|крыша|пвх|мембран|воронк|водоотвод|водосточ|geberit|pluvia|геберит|плювиа/i.test(rawQuery)
   const pvcMembraneThicknesses = Array.from(
     rawQuery.matchAll(/(^|[^\dмm])(\d\s*[,\.]\s*\d|\d{1,2})(?!\d)\s*(?:мм|mm)?(?!\s*(?:м2|м²|м\s?кв|кв\.?\s?м|m2|sq\.?\s?m))/gi)
   )
@@ -615,6 +618,34 @@ export async function GET(request: NextRequest) {
   const isPrimaryCylinderNomenclature = (name?: string | null) =>
     getNomenclatureItemType(name) === 'cylinder' &&
     !/заглуш|пробк|отвод|тройник|переход|сегмент|колено/i.test(name || '')
+
+  const isRoofFunnelNomenclature = (name?: string | null) =>
+    /воронк|geberit|pluvia|геберит|плювиа|vortex|wigar|вфо/i.test(name || '') &&
+    !/насадк|снег|мостик|огражден|пароизоляц|мембран(?!.*воронк)/i.test(name || '')
+
+  const sortRoofFunnelNomenclature = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
+    const score = (item: NomenclatureItem) => {
+      const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+      let value = item.code ? 10 : 0
+      if (/воронк/.test(text)) value += 20
+      if (/geberit|pluvia|геберит|плювиа/i.test(rawQuery)) {
+        if (/geberit|pluvia|геберит|плювиа/.test(text)) value += 80
+        if (/12\s*л\/?\s*сек|12\s*л/.test(text)) value += 8
+        if (/фланц|фартук/.test(text)) value += 4
+      }
+      if (/plastfoil|vortex/i.test(rawQuery) && /plastfoil|vortex/.test(text)) value += 45
+      if (/wigar/i.test(rawQuery) && /wigar/.test(text)) value += 45
+      if (/termoclip|термоклип|вфо/i.test(rawQuery) && /termoclip|термоклип|вфо/.test(text)) value += 45
+      if (/технониколь|тн\b/i.test(rawQuery) && /технониколь|вб\s*эко|эко/.test(text)) value += 35
+      if (/парапет/i.test(rawQuery) && /парапет/.test(text)) value += 28
+      if (/ремонт/i.test(rawQuery) && /ремонт/.test(text)) value += 20
+      if (/парапет|ремонт/.test(text) && /geberit|pluvia|геберит|плювиа/i.test(rawQuery)) value -= 12
+      return value
+    }
+    const scoreDiff = score(b) - score(a)
+    if (scoreDiff !== 0) return scoreDiff
+    return (a.name || '').localeCompare(b.name || '', 'ru')
+  })
 
   const matchesCylinderCoveringPreference = (name?: string | null) => {
     const text = name || ''
@@ -1998,6 +2029,51 @@ export async function GET(request: NextRequest) {
       ]).slice(0, 20)
     }
 
+    if (hasRoofFunnelQueryForNomenclature) {
+      const { data: funnelData } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or([
+          'name.ilike.%Geberit Pluvia%',
+          'name.ilike.%Геберит%',
+          'name.ilike.%Pluvia%',
+          'name.ilike.%воронк%',
+          'name.ilike.%PLASTFOIL VORTEX%',
+          'name.ilike.%WIGAR%',
+          'name.ilike.%TERMOCLIP ВФО%',
+          'name.ilike.%ТехноНИКОЛЬ%Воронк%',
+        ].join(','))
+        .limit(350)
+
+      const funnelItems = sortRoofFunnelNomenclature(
+        dedupeNomenclature((funnelData ?? []) as NomenclatureItem[])
+          .filter((item) => isRoofFunnelNomenclature(item.name))
+      )
+
+      const requestedFunnelItems = funnelItems.filter((item) => {
+        const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+        if (/geberit|pluvia|геберит|плювиа/i.test(rawQuery)) return /geberit|pluvia|геберит|плювиа/.test(text)
+        if (/plastfoil|vortex/i.test(rawQuery)) return /plastfoil|vortex/.test(text)
+        if (/wigar/i.test(rawQuery)) return /wigar/.test(text)
+        if (/termoclip|термоклип|вфо/i.test(rawQuery)) return /termoclip|термоклип|вфо/.test(text)
+        if (/технониколь|тн\b/i.test(rawQuery)) return /технониколь|вб\s*эко|эко/.test(text)
+        return true
+      })
+
+      const primaryFunnelItems = requestedFunnelItems.length > 0 ? requestedFunnelItems : funnelItems
+      const primaryFunnelIds = new Set(primaryFunnelItems.slice(0, 8).map((item) => item.id))
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...primaryFunnelItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+
+      nomenclature_analogs = dedupeNomenclature([
+        ...funnelItems.filter((item) => !primaryFunnelIds.has(item.id)),
+        ...nomenclature_analogs,
+      ]).slice(0, 40)
+    }
+
     requested_invoice_lines = extractRequestedInvoiceLines()
     requested_invoice_codes = extractRequestedInvoiceCodes()
 
@@ -2558,7 +2634,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (!product_id && relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature)) {
+  if (!product_id && relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature || hasRoofFunnelQueryForNomenclature)) {
     products = []
   }
   if (!product_id && isPvcRoofProjectWithoutMainSpec && relevant_nomenclature.length > 0) {
@@ -4043,6 +4119,7 @@ export async function GET(request: NextRequest) {
     : []
   const shouldUseCompactResponse = compactMode || hasConstructionInsulationQueryForContext || isBareThicknessOnly
     || hasAnySystemQueryForContext
+    || hasRoofFunnelQueryForNomenclature
   const compactFormattedContext = [
     '# Короткий контекст для ответа менеджеру',
     `**Запрос:** ${rawQuery}`,
