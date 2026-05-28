@@ -397,6 +397,8 @@ export async function GET(request: NextRequest) {
     /праймер[\s\S]{0,30}(?:№\s*)?0?8|(?:№\s*)?0?8[\s\S]{0,30}праймер/i.test(rawQuery)
   const hasOsbDirectQuery =
     /\bosb\b|осп|ориентированно[-\s]*стружечн/i.test(rawQuery)
+  const hasProfileSheetDirectQuery =
+    /профлист|профнастил|профилированн\w*\s+лист/i.test(rawQuery)
   const hasCpsDirectQuery =
     /цпс|пескобетон|цементно[-\s]*песчан|м[-\s]*300|м300/i.test(rawQuery)
   const hasKeramzitDirectQuery =
@@ -1749,6 +1751,11 @@ export async function GET(request: NextRequest) {
         'ЦБ00893',
         'ЦБ08834',
         'ЦБ06423',
+      ] : []),
+      ...(hasProfileSheetDirectQuery ? [
+        'ЦВ000222904',
+        'ЦБ17307',
+        'ЦБ09360',
       ] : []),
       ...(hasCpsDirectQuery ? [
         'ЦБ47308',
