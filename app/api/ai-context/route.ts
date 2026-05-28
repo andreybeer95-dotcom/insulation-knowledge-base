@@ -227,6 +227,7 @@ export async function GET(request: NextRequest) {
   const brandNameMap: Record<string, string> = {
     '1b4a5543-7101-46cd-9a85-9866dd1132a9': 'XOTPIPE',
     '4deb56f0-b7c9-46e9-8279-9fc4397419dd': 'ЭКОРОЛЛ',
+    '80a19db2-d3ea-4b84-84b5-3369e7633a6e': 'Ceresit',
     'c0f1731c-12a2-4d6a-bca3-6020711de7f5': 'BASWOOL',
     '6f22e435-08cc-46ab-ba45-d119ce497581': 'ROCKWOOL',
     'f5fc0110-8057-47fd-9811-9aa1a2e81d8b': 'ТЕХНОНИКОЛЬ',
@@ -378,10 +379,13 @@ export async function GET(request: NextRequest) {
     /болгирус|bolgarys|фасадн\w*\s+(?:дюб|креп)|дюбел\w*\s+фасад|креп[её]ж\w*\s+фасад/i.test(rawQuery)
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
+  const hasPvcAccessoryOnlyQuery =
+    /logicroof\s+bond|bond\s+клей|клей\s+logicroof|клей.*logicroof\s+bond|logicroof\s+mast|mast-prime|mast-pu/i.test(rawQuery)
   const hasPvcMembraneQueryForNomenclature =
     /пвх|pvc|пластфойл|plastfoil|logicroof|ecoplast|ecobase|logicbase|v[-\s]*(?:rp|gr|sl|fb)\b/i.test(rawQuery) &&
     !hasCylinderQueryForNomenclature &&
-    !hasPipelinePvcSystemQuery
+    !hasPipelinePvcSystemQuery &&
+    !hasPvcAccessoryOnlyQuery
   const hasAdhesivePvcRoofQuery =
     hasPvcMembraneQueryForNomenclature &&
     /клей|клеев|прикле|bond|адгез|флис|fleece|fb\b|osb|осп|дерев/i.test(rawQuery)
@@ -1679,6 +1683,38 @@ export async function GET(request: NextRequest) {
       ]).slice(0, 30)
     }
 
+    if (hasPvcAccessoryOnlyQuery) {
+      const [bondRes, mastRes, pvcMetalRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%LOGICROOF BOND%,name.ilike.%Logicroof Bond%')
+          .limit(60),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%LOGICROOF MAST%,name.ilike.%MAST-PRIME%,name.ilike.%MAST-PU%')
+          .limit(80),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%ПВХ Металл%,name.ilike.%ПВХ металл%')
+          .limit(80),
+      ])
+
+      const bondItems = ((bondRes.data ?? []) as NomenclatureItem[])
+        .filter((item) => /logicroof\s+bond/i.test(item.name || ''))
+      relevant_nomenclature = dedupeNomenclature([
+        ...bondItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_accessories = dedupeNomenclature([
+        ...((mastRes.data ?? []) as NomenclatureItem[]),
+        ...((pvcMetalRes.data ?? []) as NomenclatureItem[]),
+        ...nomenclature_accessories,
+      ]).slice(0, 20)
+    }
+
     requested_invoice_lines = extractRequestedInvoiceLines()
     requested_invoice_codes = extractRequestedInvoiceCodes()
 
@@ -2074,8 +2110,14 @@ export async function GET(request: NextRequest) {
   }
 
   if (hasVentFacadeQueryForNomenclature) {
-    const preferredThicknesses = constructionThicknesses.length > 0
-      ? constructionThicknesses
+    const requestedVentFacadeDensity =
+      rawQuery.match(/ВЕНТ\s+ФАСАД\s*(70|80|90)/i)?.[1] ??
+      rawQuery.match(/вент\s*фасад[^\d]{0,30}(70|80|90)/i)?.[1] ??
+      null
+    const ventFacadeThicknesses = constructionThicknesses
+      .filter((value) => !requestedVentFacadeDensity || value !== requestedVentFacadeDensity)
+    const preferredThicknesses = ventFacadeThicknesses.length > 0
+      ? ventFacadeThicknesses
       : hasMultiStoreyFacadeQueryForNomenclature ? ['100', '50', '150'] : ['150', '100']
     const thicknessFilters = preferredThicknesses.flatMap((thickness) => [
       `name.ilike.%*${thickness}%`,
@@ -2101,7 +2143,7 @@ export async function GET(request: NextRequest) {
       .or('name.ilike.%ЛАЙТ-35%,name.ilike.%ЛАЙТ-45%')
       .limit(60)
 
-    const [{ data: facadeData }, { data: lightData }, { data: membraneData }, { data: bolgirusData }] = await Promise.all([
+    const [{ data: facadeData }, { data: lightData }, { data: membraneData }, { data: bolgirusData }, { data: rockwoolVentData }] = await Promise.all([
       facadeQuery,
       hasMultiStoreyFacadeQueryForNomenclature ? lightQuery : Promise.resolve({ data: [] }),
       supabase
@@ -2114,6 +2156,12 @@ export async function GET(request: NextRequest) {
         .select('id, code, article, name, brand')
         .or('name.ilike.%Болгирус%,name.ilike.%BOLGARYS%,name.ilike.%Bolgarys%')
         .limit(10),
+      supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .eq('brand', 'ROCKWOOL')
+        .or('name.ilike.%ВЕНТИ БАТТС%,name.ilike.%VENTI BATTS%,name.ilike.%ФАСАД БАТТС%')
+        .limit(120),
     ])
 
     const facadeItems = sortBaswoolFacade((facadeData ?? []) as NomenclatureItem[], preferredThicknesses)
@@ -2130,6 +2178,15 @@ export async function GET(request: NextRequest) {
       ...lightItems,
       ...facadeItems,
       ...existingVentFacadeItems,
+    ]).slice(0, 20)
+
+    nomenclature_analogs = dedupeNomenclature([
+      ...((rockwoolVentData ?? []) as NomenclatureItem[])
+        .filter((item) =>
+          preferredThicknesses.length === 0 ||
+          preferredThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+        ),
+      ...nomenclature_analogs,
     ]).slice(0, 20)
 
     nomenclature_accessories = dedupeNomenclature([
