@@ -1756,9 +1756,8 @@ export async function GET(request: NextRequest) {
         supabase
           .from('nomenclature_1c')
           .select('id, code, article, name, brand')
-          .eq('brand', 'ROCKWOOL')
-          .or('name.ilike.%WIRED MAT%,name.ilike.%Wired Mat%,name.ilike.%WIRED%,name.ilike.%Вайред%,name.ilike.%прошивн%')
-          .limit(120),
+          .or('name.ilike.%WIRED MAT%,name.ilike.%Wired Mat%,name.ilike.%Вайред Мат%,name.ilike.%ВАЙРЕД МАТ%,name.ilike.%Rockwool%Мат%,name.ilike.%Роквул%Мат%,name.ilike.%прошивн%мат%')
+          .limit(180),
         supabase
           .from('nomenclature_1c')
           .select('id, code, article, name, brand')
@@ -1770,8 +1769,8 @@ export async function GET(request: NextRequest) {
       const isTechnicalMat = (item: NomenclatureItem) => {
         const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
         return (
-          /wired\s*mat|прошивн.*мат|тех.*мат|мат.*техническ/i.test(text) &&
-          !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп/i.test(text)
+          /wired\s*mat|вайред\s*мат|прошивн.*мат|тех.*мат|мат.*техническ|rockwool.*мат|роквул.*мат|мат.*rockwool|мат.*роквул/i.test(text) &&
+          !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп|кф\s*1|кф1/i.test(text)
         )
       }
       const sortTechnicalMat = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
@@ -1779,9 +1778,9 @@ export async function GET(request: NextRequest) {
           const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
           const thicknessRank = requestedMatThicknesses.findIndex((thickness) => hasBoardThickness(item.name, thickness))
           const normalizedThicknessRank = thicknessRank === -1 ? 50 : thicknessRank
-          if (/rockwool/i.test(text) && /wired\s*mat/i.test(text)) return normalizedThicknessRank
-          if (/rockwool/i.test(text)) return 20 + normalizedThicknessRank
-          if (/wired\s*mat|прошивн.*мат/i.test(text)) return 40 + normalizedThicknessRank
+          if (/(rockwool|роквул)/i.test(text) && /wired\s*mat|вайред\s*мат/i.test(text)) return normalizedThicknessRank
+          if (/(rockwool|роквул)/i.test(text)) return 20 + normalizedThicknessRank
+          if (/wired\s*mat|вайред\s*мат|прошивн.*мат/i.test(text)) return 40 + normalizedThicknessRank
           return 80 + normalizedThicknessRank
         }
         const scoreDiff = score(a) - score(b)
@@ -1807,7 +1806,7 @@ export async function GET(request: NextRequest) {
 
       relevant_nomenclature = dedupeNomenclature([
         ...wiredItems,
-        ...relevant_nomenclature,
+        ...relevant_nomenclature.filter(isTechnicalMat),
       ]).slice(0, 20)
       nomenclature_analogs = dedupeNomenclature([
         ...matAnalogItems,
