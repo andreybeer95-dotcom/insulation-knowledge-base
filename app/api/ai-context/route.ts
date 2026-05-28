@@ -1717,7 +1717,24 @@ export async function GET(request: NextRequest) {
       const candidateMixes = dedupeNomenclature([
         ...((ceresitRelatedRes.data ?? []) as NomenclatureItem[]),
         ...((facadeMixRes.data ?? []) as NomenclatureItem[]),
-      ]).filter(isFacadeInsulationAdhesive)
+      ])
+        .filter(isFacadeInsulationAdhesive)
+        .sort((a, b) => {
+          const score = (item: NomenclatureItem) => {
+            const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+            if (/основит|каверпликс/.test(text)) return 0
+            if (/кнауф|knauf|севенер/.test(text)) return 1
+            if (/bergauf|isofix/.test(text)) return 2
+            if (/litotherm|litoplan/.test(text)) return 3
+            if (/baumit|duocontact|procontact/.test(text)) return 4
+            if (/ct\s*83|ст\s*83/.test(text)) return 5
+            if (/ceresit|церезит/.test(text)) return 8
+            return 10
+          }
+          const scoreDiff = score(a) - score(b)
+          if (scoreDiff !== 0) return scoreDiff
+          return (b.revenue_3y ?? 0) - (a.revenue_3y ?? 0)
+        })
       const ct85Ids = new Set(ct85Items.map((item) => item.id))
 
       relevant_nomenclature = dedupeNomenclature([
