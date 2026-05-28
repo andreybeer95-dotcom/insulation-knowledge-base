@@ -1982,12 +1982,17 @@ export async function GET(request: NextRequest) {
         ...((bondRes.data ?? []) as NomenclatureItem[]),
       ])
         .filter((item) => /logicroof\s+bond/i.test(item.name || ''))
+      const mastItems = dedupeNomenclature((mastRes.data ?? []) as NomenclatureItem[])
+        .filter((item) => /logicroof\s+mast|mast[-\s]*(?:pu|prime|aks)/i.test(item.name || ''))
+      const primaryAccessoryItems = hasLogicroofMastDirectQuery
+        ? [...mastItems, ...bondItems]
+        : bondItems
       relevant_nomenclature = dedupeNomenclature([
-        ...bondItems,
+        ...primaryAccessoryItems,
         ...relevant_nomenclature,
       ]).slice(0, 20)
       nomenclature_accessories = dedupeNomenclature([
-        ...((mastRes.data ?? []) as NomenclatureItem[]),
+        ...(hasLogicroofMastDirectQuery ? [] : mastItems),
         ...((pvcMetalRes.data ?? []) as NomenclatureItem[]),
         ...nomenclature_accessories,
       ]).slice(0, 20)
