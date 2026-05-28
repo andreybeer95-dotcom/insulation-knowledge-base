@@ -1890,6 +1890,7 @@ function buildQuoteDraft(summary: {
   quoteItems: QuoteItem[];
   invoiceItems: InvoiceItem[];
   analogRecommendations: AnalogRecommendation[];
+  roofFastenerGuidance?: ReturnType<typeof buildRoofFastenerGuidance>;
   notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
 }) {
@@ -1948,6 +1949,19 @@ function buildQuoteDraft(summary: {
       lines.push(`${index + 1} | ${item.projectMaterial} | ${item.analogMaterial ?? "материал не найден"} | ${item.code ?? "код не найден"} | ${item.quantity} | ${item.unit} | ${item.calculation}`);
     });
     lines.push("Сначала считать проектное решение, затем согласовывать замену на аналог по прочности, плотности, толщине и пожарному сертификату.");
+  }
+
+  if (summary.roofFastenerGuidance?.shouldMention && summary.area.value) {
+    const rates = summary.roofFastenerGuidance.preliminaryRates;
+    const insulationFasteners = Math.ceil(summary.area.value * rates.insulationFastenersPerM2);
+    const membraneFasteners = Math.ceil(summary.area.value * rates.membraneFieldKitsPerM2);
+    const totalFasteners = Math.ceil(summary.area.value * rates.totalFieldFastenersPerM2);
+    lines.push("");
+    lines.push("Крепеж, предварительный ориентир:");
+    lines.push(`- теплоизоляция: ${rates.insulationFastenersPerM2} шт/м2 × ${summary.area.value} м2 = ${insulationFasteners} шт;`);
+    lines.push(`- мембрана по полю: ${rates.membraneFieldKitsPerM2} комплект/м2 × ${summary.area.value} м2 = ${membraneFasteners} комплектов;`);
+    lines.push(`- общий ориентир поля: ${rates.totalFieldFastenersPerM2} крепежных комплектов/м2 × ${summary.area.value} м2 = ${totalFasteners} шт/комплектов.`);
+    lines.push("Финально крепеж считать по ветровому расчету: краевые, угловые и периметральные зоны могут потребовать больше.");
   }
 
   const funnelAlternativeSources = [
@@ -2189,6 +2203,7 @@ export async function POST(request: NextRequest) {
       quoteItems,
       invoiceItems,
       analogRecommendations,
+      roofFastenerGuidance,
       notFound,
       projectOnly,
     });
