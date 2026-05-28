@@ -1684,7 +1684,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (hasPvcAccessoryOnlyQuery) {
-      const [bondRes, mastRes, pvcMetalRes] = await Promise.all([
+      const [bondByCodeRes, bondRes, mastRes, pvcMetalRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .in('code', ['ЦВ000209969', 'ЦВ000219591'])
+          .limit(10),
         supabase
           .from('nomenclature_1c')
           .select('id, code, article, name, brand')
@@ -1702,7 +1707,10 @@ export async function GET(request: NextRequest) {
           .limit(80),
       ])
 
-      const bondItems = ((bondRes.data ?? []) as NomenclatureItem[])
+      const bondItems = dedupeNomenclature([
+        ...((bondByCodeRes.data ?? []) as NomenclatureItem[]),
+        ...((bondRes.data ?? []) as NomenclatureItem[]),
+      ])
         .filter((item) => /logicroof\s+bond/i.test(item.name || ''))
       relevant_nomenclature = dedupeNomenclature([
         ...bondItems,
