@@ -383,6 +383,24 @@ export async function GET(request: NextRequest) {
     /болгирус|bolgarys|фасадн\w*\s+(?:дюб|креп)|дюбел\w*\s+фасад|креп[её]ж\w*\s+фасад/i.test(rawQuery)
   const hasCeresitCt85DirectQuery =
     /(?:ceresit|церезит)[\s\S]{0,30}(?:ct|ст)\s*85|(?:ct|ст)\s*85[\s\S]{0,30}(?:ceresit|церезит)/i.test(rawQuery)
+  const hasLogicpirSlopeDirectQuery =
+    /logicpir[\s\S]{0,30}slope|логикпир[\s\S]{0,30}slope|logicpir[\s\S]{0,40}уклон|уклон[\s\S]{0,40}logicpir/i.test(rawQuery)
+  const hasKflexStDirectQuery =
+    /k[-\s]*flex[\s\S]{0,30}\bst\b|ка[-\s]*флекс[\s\S]{0,30}\bst\b/i.test(rawQuery)
+  const hasPlitonitBDirectQuery =
+    /plitonit|плитонит/i.test(rawQuery) && /(?:^|\s)(?:b|в)(?:\s|$)|усиленн|плиточн/i.test(rawQuery)
+  const hasKnaufSevenerDirectQuery =
+    /кнауф[\s\S]{0,30}севенер|knauf[\s\S]{0,30}sevener|севенер/i.test(rawQuery)
+  const hasOsnovitKaverpliksDirectQuery =
+    /основит[\s\S]{0,40}каверпликс|osnovit[\s\S]{0,40}kaverpliks|каверпликс/i.test(rawQuery)
+  const hasPrimer08DirectQuery =
+    /праймер[\s\S]{0,30}(?:№\s*)?0?8|(?:№\s*)?0?8[\s\S]{0,30}праймер/i.test(rawQuery)
+  const hasOsbDirectQuery =
+    /\bosb\b|осп|ориентированно[-\s]*стружечн/i.test(rawQuery)
+  const hasCpsDirectQuery =
+    /цпс|пескобетон|цементно[-\s]*песчан|м[-\s]*300|м300/i.test(rawQuery)
+  const hasKeramzitDirectQuery =
+    /керамзит/i.test(rawQuery)
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcAccessoryOnlyQuery =
@@ -1687,6 +1705,87 @@ export async function GET(request: NextRequest) {
         ...fastenerItems.filter((item) => !primaryIds.has(item.id)),
         ...nomenclature_analogs,
       ]).slice(0, 30)
+    }
+
+    const directCommonCodes = [
+      ...(hasLogicpirSlopeDirectQuery ? [
+        'ЦВ000229958',
+        'ЦВ000229957',
+        'ЦВ000221449',
+        'ЦВ000221450',
+        'ЦВ000221451',
+        'ЦВ000221452',
+      ] : []),
+      ...(hasKflexStDirectQuery ? [
+        'ЦБ04022',
+        'ЦБ04023',
+        'ЦБ04019',
+        'ЦБ03334',
+        'ЦБ07035',
+        'ЦБ08900',
+        'ЦБ09764',
+      ] : []),
+      ...(hasPlitonitBDirectQuery ? [
+        'ЦБ07151',
+      ] : []),
+      ...(hasKnaufSevenerDirectQuery ? [
+        'ЦВ000207506',
+        'ВН02249',
+      ] : []),
+      ...(hasOsnovitKaverpliksDirectQuery ? [
+        'ЦВ000224624',
+        'ЦБ09790',
+        'ЦБ02120',
+        'ЦБ47791',
+      ] : []),
+      ...(hasPrimer08DirectQuery ? [
+        'ЦВ000221454',
+      ] : []),
+      ...(hasOsbDirectQuery ? [
+        'ВН01864',
+        'ЦБ00507',
+        'ВН05594',
+        'ЦБ04386',
+        'ЦБ00893',
+        'ЦБ08834',
+        'ЦБ06423',
+      ] : []),
+      ...(hasCpsDirectQuery ? [
+        'ЦБ47308',
+        'ЦВ000221474',
+        'ЦВ000246583',
+      ] : []),
+      ...(hasKeramzitDirectQuery ? [
+        'ЦВ000220310',
+        'ЦВ000221881',
+        'ЦВ000226993',
+        'ЦВ000220173',
+      ] : []),
+    ]
+
+    if (directCommonCodes.length > 0) {
+      const uniqueDirectCommonCodes = Array.from(new Set(directCommonCodes))
+      const { data: directCommonItemsByCode } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .in('code', uniqueDirectCommonCodes)
+        .limit(80)
+
+      const directCommonOrder = new Map(uniqueDirectCommonCodes.map((code, index) => [code, index]))
+      const directCommonItems = dedupeNomenclature((directCommonItemsByCode ?? []) as NomenclatureItem[])
+        .sort((a, b) => (directCommonOrder.get(a.code || '') ?? 999) - (directCommonOrder.get(b.code || '') ?? 999))
+
+      if (directCommonItems.length > 0) {
+        const directCommonIds = new Set(directCommonItems.map((item) => item.id))
+        relevant_nomenclature = dedupeNomenclature([
+          ...directCommonItems,
+          ...relevant_nomenclature,
+        ]).slice(0, 24)
+        nomenclature_analogs = dedupeNomenclature([
+          ...relevant_nomenclature.filter((item) => !directCommonIds.has(item.id)),
+          ...nomenclature_analogs,
+        ]).slice(0, 30)
+      }
     }
 
     if (hasCeresitCt85DirectQuery) {
