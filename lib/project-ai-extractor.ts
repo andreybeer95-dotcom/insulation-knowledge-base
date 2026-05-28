@@ -110,33 +110,40 @@ function collectWindows(text: string, patterns: RegExp[], radius = 3200) {
 
 function selectRoofExtractionText(text: string) {
   const maxChars = Number(process.env.PROJECT_AI_CONTEXT_CHARS ?? 26000);
-  const patterns = [
+  const highSignalPatterns = [
     /площадь\s+(?:кровли|покрытия|застройки)/gi,
-    /общие\s+данные|технико-экономические\s+показатели|тэпы/gi,
-    /экспликац[а-я\s-]*(?:кров|покрыт|полов)|ведомост[а-я\s-]*(?:кров|покрыт|материал)/gi,
-    /конструкци[а-я\s-]*(?:кров|покрыт)|пирог[а-я\s-]*(?:кров|покрыт)/gi,
-    /кровельн[а-я\s-]*(?:покрыт|ковер|материал)|состав\s+покрыт/gi,
     /спецификац[а-я\s-]*(?:кров|покрыт|ворон)/gi,
     /состав\s+кровл/gi,
-    /тип\s+кровл/gi,
     /logicroof|ecoplast|пвх[а-я\s-]*мембран/gi,
     /техноэласт|унифлекс|бикрост|линокром/gi,
     /logicpir|техноруф|carbon|xps|эппс/gi,
     /пароизоляц|технобарьер|паробарьер/gi,
     /воронк|водосток|водоотвод|желоб/gi,
+  ];
+  const contextPatterns = [
+    /общие\s+данные|технико-экономические\s+показатели|тэпы/gi,
+    /экспликац[а-я\s-]*(?:кров|покрыт|полов)|ведомост[а-я\s-]*(?:кров|покрыт|материал)/gi,
+    /конструкци[а-я\s-]*(?:кров|покрыт)|пирог[а-я\s-]*(?:кров|покрыт)/gi,
+    /кровельн[а-я\s-]*(?:покрыт|ковер|материал)|состав\s+покрыт/gi,
+    /тип\s+кровл/gi,
     /сэндвич-панел|сендвич-панел/gi,
   ];
 
-  const windows = collectWindows(text, patterns);
+  const highSignalWindows = collectWindows(text, highSignalPatterns);
+  const contextWindows = collectWindows(text, contextPatterns);
+  const windows = highSignalWindows.length ? [...highSignalWindows, ...contextWindows] : contextWindows;
   if (!windows.length) return text.slice(0, maxChars);
 
   const head = compactSnippet(text.slice(0, Math.min(text.length, 3500)));
   const tail = compactSnippet(text.slice(Math.max(0, text.length - 2500)));
+  const appended: Array<{ start: number; end: number }> = [];
   let result = head;
   for (const window of windows) {
+    if (appended.some((item) => window.start >= item.start && window.end <= item.end)) continue;
     const next = compactSnippet(text.slice(window.start, window.end));
     if (result.length + next.length > maxChars) break;
     result += `${result ? "\n\n---\n\n" : ""}${next}`;
+    appended.push(window);
   }
   if (tail && result.length + tail.length <= maxChars) {
     result += `${result ? "\n\n---\n\n" : ""}${tail}`;
