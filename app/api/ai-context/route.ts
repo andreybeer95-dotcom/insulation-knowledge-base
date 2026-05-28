@@ -1479,6 +1479,7 @@ export async function GET(request: NextRequest) {
           .slice(0, 20)
       }
     }
+  }
 
     if (hasBaswoolLightDirectQuery) {
       const requestedLightDensity =
@@ -1715,7 +1716,6 @@ export async function GET(request: NextRequest) {
         ]).slice(0, 40)
       }
     }
-  }
 
   if (hasPvcMembraneQueryForNomenclature && !isBareThicknessOnly) {
     const pvcQueries = await Promise.all([
