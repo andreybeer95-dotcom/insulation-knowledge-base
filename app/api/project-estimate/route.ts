@@ -654,10 +654,18 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       role: "водоотвод/кровельная воронка",
       label: "Водосточная воронка Geberit Pluvia",
       detected: hasGeberitPluvia,
-      searchTerms: ["Geberit Pluvia", "Воронка Geberit Pluvia"],
+      searchTerms: [
+        "Geberit Pluvia",
+        "Воронка Geberit Pluvia",
+        "Воронка ТехноНИКОЛЬ ВБ ЭКО",
+        "Воронка ТехноНИКОЛЬ ЭКО с обжимным фланцем",
+        "Воронка кровельная PLASTFOIL VORTEX",
+        "Воронка кровельная WIGAR PRO 110",
+        "TERMOCLIP ВФО",
+      ],
       quantityType: "project",
       unitCount: geberitPluviaUnitCount,
-      note: "В проекте указана воронка Geberit Pluvia; не заменять автоматически на ТЕХНОНИКОЛЬ без согласования аналога.",
+      note: "В проекте указана воронка Geberit Pluvia; основную позицию держать по проекту, аналоги ТЕХНОНИКОЛЬ/PLASTFOIL/WIGAR/TERMOCLIP предлагать только на согласование.",
     },
     {
       key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
@@ -1211,6 +1219,11 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "hydrowind_membrane" && /гидро.?ветрозащит|ветрозащит/i.test(item.name ?? "")) score += 14;
   if (layer.key === "keramzit_slope" && /20-40|20\/40/i.test(item.name ?? "")) score += 4;
   if (layer.key.startsWith("roof_funnel") && /воронк/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /geberit|pluvia/i.test(item.name ?? "")) score += 42;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /12\s*л\/?\s*сек|12\s*л/i.test(item.name ?? "")) score += 8;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /фланц|фартук/i.test(item.name ?? "")) score += 5;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /парапет|ремонт/i.test(item.name ?? "")) score -= 14;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /технониколь|plastfoil|wigar|termoclip/i.test(item.name ?? "")) score += 3;
   if (layer.key === "roof_funnel_parapet" && /парапет/i.test(item.name ?? "")) score += 16;
   if (layer.key === "roof_funnel_parapet" && /квадрат/i.test(item.name ?? "")) score += 4;
   if (layer.key === "roof_funnel" && /обжимн|прижимн|вб эко|стандарт/i.test(item.name ?? "")) score += 6;
@@ -1248,9 +1261,10 @@ async function findNomenclature(layer: DetectedLayer) {
     }
   }
 
+  const resultLimit = layer.key === "roof_funnel_geberit_pluvia" ? 12 : 3;
   const supabaseResult = Array.from(found.values())
     .sort((a, b) => itemScore(b, layer) - itemScore(a, layer))
-    .slice(0, 3);
+    .slice(0, resultLimit);
 
   if (supabaseResult.length) return supabaseResult;
 
@@ -1282,7 +1296,7 @@ async function findLocalNomenclature(layer: DetectedLayer) {
       return terms.some((parts) => parts.every((part) => name.includes(part)));
     })
     .sort((a, b) => itemScore(b, layer) - itemScore(a, layer))
-    .slice(0, 3);
+    .slice(0, layer.key === "roof_funnel_geberit_pluvia" ? 12 : 3);
 }
 
 function parseRollArea(name: string | null) {
@@ -1431,6 +1445,7 @@ function buildQuoteDraft(summary: {
   fileName: string;
   area: AreaInfo;
   quoteItems: QuoteItem[];
+  invoiceItems: InvoiceItem[];
   notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
 }) {
@@ -1452,6 +1467,41 @@ function buildQuoteDraft(summary: {
     } else {
       lines.push("В счет: счетные позиции с кодами 1С автоматически не найдены.");
     }
+  }
+
+  const funnelAlternativeSources = [
+    ...summary.invoiceItems.map((item) => ({
+      role: item.role,
+      requestedLayer: item.requestedLayer,
+      material: item.material,
+      alternatives: item.alternatives,
+    })),
+    ...summary.notFound.map((item) => ({
+      role: item.role,
+      requestedLayer: item.requestedLayer,
+      material: item.material,
+      alternatives: item.alternatives ?? [],
+    })),
+  ].filter((item) => /воронк|водоотвод|водосточ/i.test(`${item.role} ${item.requestedLayer} ${item.material ?? ""}`));
+
+  const funnelAlternativeLines: string[] = [];
+  const usedFunnelAlternatives = new Set<string>();
+  for (const source of funnelAlternativeSources) {
+    for (const alternative of source.alternatives ?? []) {
+      const name = alternative.name ?? "";
+      if (!alternative.code || !name || !/воронк|geberit|pluvia|plastfoil|wigar|termoclip|технониколь/i.test(name)) continue;
+      const key = `${alternative.code}:${name}`;
+      if (usedFunnelAlternatives.has(key)) continue;
+      usedFunnelAlternatives.add(key);
+      funnelAlternativeLines.push(`- ${alternative.code} — ${name}`);
+    }
+  }
+
+  if (funnelAlternativeLines.length) {
+    lines.push("");
+    lines.push("Воронки/аналоги на согласование:");
+    lines.push(...funnelAlternativeLines.slice(0, 8));
+    lines.push("Основную воронку из проекта не заменять автоматически; подобрать аналог только после согласования типа, диаметра/размера, обогрева и схемы водоотвода.");
   }
 
   if (summary.notFound.length) {
@@ -1645,6 +1695,7 @@ export async function POST(request: NextRequest) {
       fileName: file.name,
       area,
       quoteItems,
+      invoiceItems,
       notFound,
       projectOnly,
     });
