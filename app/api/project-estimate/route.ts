@@ -1789,7 +1789,7 @@ async function loadProjectSystemRules(system: ProjectSystemContext | null) {
     return rules
       .filter((rule) => {
         const ruleSystemName = normalizeSystemText(extractSystemNameFromRule(rule));
-        if (ruleSystemName && names.includes(ruleSystemName)) return true;
+        if (ruleSystemName) return names.includes(ruleSystemName);
 
         const haystack = normalizeSystemText(`${rule.category || ""} ${rule.condition || ""} ${rule.rule_name || ""} ${rule.rule_text || ""}`);
         if (ids.some((id) => id && haystack.includes(id))) return true;
