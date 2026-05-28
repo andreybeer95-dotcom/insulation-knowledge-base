@@ -76,6 +76,18 @@ type QuoteItem = {
   note: string | null;
 };
 
+type AnalogRecommendation = {
+  role: string;
+  projectMaterial: string;
+  analogMaterial: string | null;
+  code: string | null;
+  brand: string | null;
+  quantity: string;
+  unit: string;
+  calculation: string;
+  note: string;
+};
+
 let localNomenclatureCache: NomenclatureItem[] | null = null;
 
 type AreaInfo = {
@@ -179,29 +191,6 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
     };
   }
 
-  const roofSpecAreas = extractRoofSpecAreas(text);
-  if (roofSpecAreas.membraneTotalArea > 0) {
-    return {
-      value: roofSpecAreas.membraneTotalArea,
-      source: "pdf_text",
-      confidence: "medium",
-      note: roofSpecAreas.sandwichRoofArea > 0
-        ? `Площадь мембранной кровли взята из спецификации кровельного покрытия. Отдельно найден тип кровли из сэндвич-панелей ${roofSpecAreas.sandwichRoofArea} м2; его считать отдельно по ведомости/номенклатуре.`
-        : "Площадь мембранной кровли взята из спецификации кровельного покрытия.",
-    };
-  }
-
-  const plastfoilMainArea = detectPlastfoilLayers(text.toLowerCase())
-    .find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride;
-  if (plastfoilMainArea && plastfoilMainArea > 0) {
-    return {
-      value: round(plastfoilMainArea, 2),
-      source: "pdf_text",
-      confidence: "medium",
-      note: "Площадь основной ПВХ-мембраны Plastfoil Classic взята из спецификации элементов кровли. В проекте указано, что объем дан без учета раскладки и раскроя; для счета сверить с ведомостью кровли.",
-    };
-  }
-
   const roofAreaPatterns = [
     new RegExp(`(?:площадь\\s+(?:кровли|покрытия))\\s*,?\\s*(?:м\\s*2|м2|м²|кв\\.?\\s*м)\\s*${NUMBER}`, "i"),
     new RegExp(`(?:площадь\\s+(?:кровли|покрытия)|s\\s*(?:кровли|покрытия))[^\\d]{0,30}${NUMBER}\\s*(?:м2|м²|кв\\.?\\s*м)`, "i"),
@@ -218,6 +207,29 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
         note: "Площадь найдена в тексте PDF. Перед счетом желательно сверить с ведомостью/планом кровли.",
       };
     }
+  }
+
+  const roofSpecAreas = extractRoofSpecAreas(text);
+  if (roofSpecAreas.membraneTotalArea > 0) {
+    return {
+      value: roofSpecAreas.membraneTotalArea,
+      source: "pdf_text",
+      confidence: "medium",
+      note: roofSpecAreas.sandwichRoofArea > 0
+        ? `Площадь мембранной кровли взята из спецификации кровельного покрытия как запасной источник. Отдельно найден тип кровли из сэндвич-панелей ${roofSpecAreas.sandwichRoofArea} м2; его считать отдельно по ведомости/номенклатуре.`
+        : "Площадь мембранной кровли взята из спецификации кровельного покрытия как запасной источник, потому что строка «Площадь кровли» не найдена.",
+    };
+  }
+
+  const plastfoilMainArea = detectPlastfoilLayers(text.toLowerCase())
+    .find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride;
+  if (plastfoilMainArea && plastfoilMainArea > 0) {
+    return {
+      value: round(plastfoilMainArea, 2),
+      source: "pdf_text",
+      confidence: "medium",
+      note: "Площадь основной ПВХ-мембраны Plastfoil Classic взята из спецификации элементов кровли как запасной источник. В проекте указано, что объем дан без учета раскладки и раскроя; для счета сверить с ведомостью кровли.",
+    };
   }
 
   const axesMatch = text.match(new RegExp(`(?:размеры|осях|в\\s+осях)[^\\d]{0,80}${NUMBER}\\s*м?\\s*[xхХ*]\\s*${NUMBER}\\s*м`, "i"));
@@ -1250,22 +1262,22 @@ function buildRoofFastenerGuidance(text: string, question: string) {
 
   return {
     shouldMention,
-    source: "правило из консультации специалиста, 2026-05-25",
+    source: "правило из консультации специалиста, обновлено 2026-05-28",
     scope: "механическое крепление мембраны/утеплителя в кровельных системах",
     rules: [
       "Крепеж подбирается по общей толщине теплоизоляции и типу основания.",
       "Комплект для мембраны: телескопический крепеж + саморез; для бетонного основания дополнительно нужен нейлоновый дюбель/анкерный элемент.",
       "Для профлиста применяется сверлоконечный саморез; для бетона — остроконечный саморез в дюбель/анкер после засверливания.",
       "Пример из консультации: при 150 мм утепления нужен телескопический крепеж 120 мм и саморез 70 мм.",
-      "Основное поле мембраны: ориентир 6 комплектов/м2, то есть 6 телескопов + 6 саморезов на м2.",
+      "Основное поле мембраны: предварительный ориентир 4 комплекта/м2, то есть 4 телескопа + 4 самореза на м2.",
       "Предварительное крепление теплоизоляции: минимум 2 крепежа/м2.",
-      "Предварительный полный ориентир для поля: 8 крепежей/м2, но не как финальный ветровой расчет.",
+      "Предварительный полный ориентир для поля: 6 крепежных комплектов/м2, но не как финальный ветровой расчет.",
       "Краевые, периметральные и угловые ветровые зоны рассчитываются отдельно и могут требовать больше крепежа.",
     ],
     preliminaryRates: {
       insulationFastenersPerM2: 2,
-      membraneFieldKitsPerM2: 6,
-      totalFieldFastenersPerM2: 8,
+      membraneFieldKitsPerM2: 4,
+      totalFieldFastenersPerM2: 6,
     },
   };
 }
@@ -1535,6 +1547,111 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
   };
 }
 
+function isRoofWoolProjectLayer(layer: DetectedLayer) {
+  const text = `${layer.key} ${layer.role} ${layer.label}`.toLowerCase();
+  return /technoruf|технор[уо]ф|dirock|дирок|минераловатн|roof_mw/i.test(text)
+    && /кровл|руф|roof|теплоизоляц/i.test(text);
+}
+
+function isUpperRoofWoolLayer(layer: DetectedLayer) {
+  const text = `${layer.key} ${layer.role} ${layer.label}`.toLowerCase();
+  return /верхн|_в|в\s*(?:60|проф|экстра|оптима)|в60/i.test(text);
+}
+
+function roofWoolAnalogTerms(layer: DetectedLayer) {
+  if (isUpperRoofWoolLayer(layer)) {
+    return ["BASWOOL РУФ В", "BASWOOL РУФ В 170", "BASWOOL РУФ В 180", "BASWOOL РУФ В 160"];
+  }
+
+  return ["BASWOOL РУФ Н", "BASWOOL РУФ Н 110", "BASWOOL РУФ Н 100", "BASWOOL РУФ Н 120"];
+}
+
+function baswoolRoofAnalogScore(item: NomenclatureItem, layer: DetectedLayer) {
+  const name = (item.name ?? "").toLowerCase();
+  let score = item.code ? 10 : 0;
+  if (/baswool|басвул|басвол/i.test(item.name ?? "")) score += 50;
+  if (/руф|ruf/i.test(name)) score += 20;
+  if (/фасад|вент|лайт|стандарт|сэндвич/i.test(name)) score -= 30;
+
+  if (isUpperRoofWoolLayer(layer)) {
+    if (/руф\s*в|ruf\s*v/i.test(name)) score += 35;
+    if (/руф\s*н|ruf\s*n/i.test(name)) score -= 35;
+    if (/руф\s*в\s*(?:160|170|180|190)|в\s*(?:160|170|180|190)/i.test(name)) score += 12;
+  } else {
+    if (/руф\s*н|ruf\s*n/i.test(name)) score += 35;
+    if (/руф\s*в|ruf\s*v/i.test(name)) score -= 35;
+    if (/руф\s*н\s*(?:100|110|120)|н\s*(?:100|110|120)/i.test(name)) score += 12;
+  }
+
+  if (layer.thicknessMm) {
+    const thickness = String(layer.thicknessMm);
+    if (new RegExp(`[хx*]${thickness}(?:\\s*мм|\\b)|\\b${thickness}\\s*мм`).test(name)) score += 18;
+    if (layer.thicknessMm === 100 && /[хx*]50(?:\s*мм|\b)|\b50\s*мм/i.test(name)) score += 4;
+  }
+
+  if (parsePackageVolume(item.name) !== null) score += 6;
+  return score;
+}
+
+async function findRoofWoolAnalogCandidates(layer: DetectedLayer) {
+  const supabase = getServiceSupabase();
+  const found = new Map<string, NomenclatureItem>();
+
+  for (const term of roofWoolAnalogTerms(layer)) {
+    const { data, error } = await supabase
+      .from("nomenclature_1c")
+      .select("code,name,brand")
+      .ilike("name", buildSearchPattern(term))
+      .limit(30);
+
+    if (error) {
+      console.warn(`Roof wool analog search failed for "${term}":`, errorMessage(error));
+      continue;
+    }
+
+    for (const item of (data ?? []) as NomenclatureItem[]) {
+      const key = `${item.code ?? ""}:${item.name ?? ""}`;
+      found.set(key, item);
+    }
+  }
+
+  return Array.from(found.values())
+    .sort((a, b) => baswoolRoofAnalogScore(b, layer) - baswoolRoofAnalogScore(a, layer))
+    .slice(0, 2);
+}
+
+async function buildRoofAnalogRecommendations(layers: DetectedLayer[], area: AreaInfo) {
+  const recommendations: AnalogRecommendation[] = [];
+  const used = new Set<string>();
+
+  for (const layer of layers) {
+    if (!isRoofWoolProjectLayer(layer) || layer.projectOnly) continue;
+    const candidates = await findRoofWoolAnalogCandidates(layer);
+    const candidate = candidates[0] ?? null;
+    if (!candidate?.code) continue;
+
+    const key = `${layer.key}:${candidate.code}`;
+    if (used.has(key)) continue;
+    used.add(key);
+
+    const quantity = buildQuantity(layer, area, candidate);
+    const parsedQuantity = extractQuoteQuantity(quantity.text);
+    recommendations.push({
+      role: layer.role,
+      projectMaterial: layer.label,
+      analogMaterial: candidate.name,
+      code: candidate.code,
+      brand: candidate.brand,
+      quantity: parsedQuantity.quantity,
+      unit: parsedQuantity.unit,
+      calculation: quantity.text,
+      note: "Коммерческий аналог BASWOOL РУФ на согласование: сохранить роль слоя и толщину/общую толщину из проекта; перед заменой сверить прочность, плотность и пожарный сертификат.",
+    });
+  }
+
+  return recommendations;
+}
+
 function normalizeSystemText(value: string) {
   return value
     .toLowerCase()
@@ -1685,6 +1802,28 @@ async function loadProjectSystemRules(system: ProjectSystemContext | null) {
   }
 }
 
+function buildProjectSystemRoleLines(system: ProjectSystemContext | null) {
+  if (!system) return [];
+
+  const name = normalizeSystemText(`${system.name} ${system.navAnalogName ?? ""}`);
+
+  if (name.includes("тн кровля классик")) {
+    return [
+      "Скелет системы ТН-КРОВЛЯ Классик для расчета:",
+      "- кровельный ковер: LOGICROOF V-RP / PRO V-RP, считать площадь × 1,15; без толщины мембрану не ставить в счет;",
+      "- крепеж мембраны: TERMOCLIP саморез + телескоп, финально только по ветровому расчету;",
+      "- верхний слой утепления: ТЕХНОРУФ В ЭКСТРА / В ПРОФ / В60 по проекту, считать площадь × 1,03 × толщину;",
+      "- нижний слой утепления: ТЕХНОРУФ Н ПРОФ / Н30 / Н ОПТИМА по проекту, считать площадь × 1,03 × толщину;",
+      "- уклонообразующий слой: ТЕХНОРУФ КЛИН / LOGICPIR SLOPE / XPS SLOPE, считать только по схеме уклонов;",
+      "- пароизоляция: Паробарьер СА500 / СФ1000 / указанная в проекте, считать площадь × 1,12;",
+      "- основание профлист: по КМ/КМД, автоматически в счет кровельных материалов не ставить;",
+      "- водоотвод: воронки/желоба только по проекту водоотвода или калькулятору.",
+    ];
+  }
+
+  return [];
+}
+
 function buildProjectQuery(summary: {
   direction: string;
   question: string;
@@ -1750,12 +1889,16 @@ function buildQuoteDraft(summary: {
   systemContext?: ProjectSystemContext | null;
   quoteItems: QuoteItem[];
   invoiceItems: InvoiceItem[];
+  analogRecommendations: AnalogRecommendation[];
   notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
 }) {
   const lines: string[] = [];
   lines.push(`Черновик КП без цен: ${summary.fileName}`);
   lines.push(`Площадь: ${summary.area.value ? `${summary.area.value} м2 (${summary.area.source})` : "не найдена"}`);
+  if (summary.area.note) {
+    lines.push(`Основание площади: ${summary.area.note}`);
+  }
   lines.push("");
 
   if (summary.systemContext) {
@@ -1775,6 +1918,10 @@ function buildQuoteDraft(summary: {
         .join("; ");
       lines.push(`Подтянуты системные правила: ${ruleNames}`);
     }
+    const systemRoleLines = buildProjectSystemRoleLines(summary.systemContext);
+    if (systemRoleLines.length) {
+      lines.push(...systemRoleLines);
+    }
     lines.push("");
   }
 
@@ -1791,6 +1938,16 @@ function buildQuoteDraft(summary: {
     } else {
       lines.push("В счет: счетные позиции с кодами 1С автоматически не найдены.");
     }
+  }
+
+  if (summary.analogRecommendations.length) {
+    lines.push("");
+    lines.push("Аналоги из нашего ассортимента на согласование:");
+    lines.push("№ | Проектный слой | Аналог | Код 1С | Кол-во | Ед. | Расчет");
+    summary.analogRecommendations.forEach((item, index) => {
+      lines.push(`${index + 1} | ${item.projectMaterial} | ${item.analogMaterial ?? "материал не найден"} | ${item.code ?? "код не найден"} | ${item.quantity} | ${item.unit} | ${item.calculation}`);
+    });
+    lines.push("Сначала считать проектное решение, затем согласовывать замену на аналог по прочности, плотности, толщине и пожарному сертификату.");
   }
 
   const funnelAlternativeSources = [
@@ -2024,12 +2181,14 @@ export async function POST(request: NextRequest) {
     }
 
     const quoteItems = buildQuoteItems(invoiceItems);
+    const analogRecommendations = await buildRoofAnalogRecommendations(layers, area);
     const quoteDraft = buildQuoteDraft({
       fileName: file.name,
       area,
       systemContext: projectSystem,
       quoteItems,
       invoiceItems,
+      analogRecommendations,
       notFound,
       projectOnly,
     });
@@ -2055,6 +2214,7 @@ export async function POST(request: NextRequest) {
       invoice_items: invoiceItems,
       quote_items: quoteItems,
       quote_draft: quoteDraft,
+      analog_recommendations: analogRecommendations,
       project_only: projectOnly,
       not_found: notFound,
       roof_fastener_guidance: roofFastenerGuidance,
@@ -2075,6 +2235,7 @@ export async function POST(request: NextRequest) {
       aiExtraction: groundedAiExtraction,
       invoiceItems,
       quoteItems,
+      analogRecommendations,
       quoteDraft,
       projectSystem,
       projectOnly,
