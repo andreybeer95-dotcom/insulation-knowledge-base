@@ -1028,12 +1028,17 @@ export async function GET(request: NextRequest) {
   const addRequestedInvoiceArticles = (articles: Set<string>) => {
     const [firstSize, secondSize] = requestedSizeNumbers
     const hasXotpipeSp100 = /xotpipe|хотпайп/i.test(rawQuery) && /\bsp[-\s]*100\b/i.test(rawQuery)
+    const hasExplicitXotpipeCoating =
+      /alu|алю|фольг|негорюч|нг\s*фольг|me\b|o-me-zn|оцинк|кожух|outside|защитн/i.test(rawQuery)
 
     if (hasXotpipeSp100 && firstSize && secondSize) {
       if (/цилиндр/i.test(rawQuery) && /без покрыт/i.test(rawQuery)) {
         articles.add(`SP100L10DT${firstSize}-${secondSize}`)
       }
-      if (/l[-\s]*90|отвод\s*90/i.test(rawQuery) && /без покрыт/i.test(rawQuery)) {
+      if (
+        /l[-\s]*90|отвод\s*90/i.test(rawQuery) &&
+        (/без покрыт/i.test(rawQuery) || !hasExplicitXotpipeCoating)
+      ) {
         articles.add(`SP100L90DT${firstSize}-${secondSize}`)
       }
     }
