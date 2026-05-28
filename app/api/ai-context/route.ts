@@ -403,6 +403,11 @@ export async function GET(request: NextRequest) {
     /цпс|пескобетон|цементно[-\s]*песчан|м[-\s]*300|м300/i.test(rawQuery)
   const hasKeramzitDirectQuery =
     /керамзит/i.test(rawQuery)
+  const hasLogicroofMastDirectQuery =
+    /logicroof[\s\S]{0,30}mast|mast[-\s]*(?:pu|prime|aks)|мастик[\s\S]{0,30}logicroof|праймер[\s\S]{0,30}mast[-\s]*prime/i.test(rawQuery)
+  const hasMastic22DirectQuery =
+    /мастик/i.test(rawQuery) &&
+    /(?:№|n|no\.?|номер)\s*22|мастик[\s\S]{0,20}\b22\b|\b22\b[\s\S]{0,20}мастик/i.test(rawQuery)
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcAccessoryOnlyQuery =
@@ -1772,6 +1777,14 @@ export async function GET(request: NextRequest) {
         'ЦВ000221881',
         'ЦВ000226993',
         'ЦВ000220173',
+      ] : []),
+      ...(hasLogicroofMastDirectQuery ? [
+        'ЦВ000228797',
+        'ЦВ000228799',
+        'ЦВ000228798',
+      ] : []),
+      ...(hasMastic22DirectQuery ? [
+        'ЦБ08060',
       ] : []),
     ]
 
