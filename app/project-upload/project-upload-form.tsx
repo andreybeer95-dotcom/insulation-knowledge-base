@@ -5,6 +5,7 @@ import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 type EstimateResponse = {
   ok: boolean;
   error?: string;
+  projectEstimateLogId?: string | null;
   fileName?: string;
   chars?: number;
   pages?: number;
@@ -337,6 +338,12 @@ export default function ProjectUploadForm() {
                   }`}
                 >
                   {aiStatusLabel(result.aiExtraction)}
+                </div>
+              )}
+
+              {result.projectEstimateLogId && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                  Расчет сохранен в журнал проектов: {result.projectEstimateLogId}
                 </div>
               )}
 

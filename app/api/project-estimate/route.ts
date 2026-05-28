@@ -567,13 +567,37 @@ function hasGroundedSnippet(pdfText: string, sourceText: string | null | undefin
   return sourceWords.filter((word) => pdf.includes(word)).length >= Math.min(sourceWords.length, 6);
 }
 
+function hasPdfMaterialEvidence(layer: ProjectAiLayer, pdfText: string) {
+  const pdf = normalizeGroundingText(pdfText);
+  const layerText = normalizeGroundingText(`${layer.material ?? ""} ${layer.role ?? ""} ${layer.note ?? ""}`);
+  if (!layerText) return false;
+
+  const checks: Array<[RegExp, RegExp]> = [
+    [/logicroof\s+v\s+rp|пвх\s+мембран|полимерн[а-я]*\s+мембран/, /logicroof\s+v\s+rp|пвх\s+мембран|полимерн[а-я]*\s+мембран/],
+    [/logicpir/, /logicpir/],
+    [/технор[уо]ф/, /технор[уо]ф/],
+    [/xps|carbon|экструзион[а-я]*|пенополистирол/, /xps|carbon|экструзион[а-я]*|пенополистирол/],
+    [/технобарьер|паробарьер|пароизоляц/, /технобарьер|паробарьер|пароизоляц/],
+    [/гидро\s*ветрозащит|ветрозащит/, /гидро\s*ветрозащит|ветрозащит/],
+    [/унифлекс/, /унифлекс/],
+    [/техноэласт/, /техноэласт/],
+    [/керамзит/, /керамзит/],
+    [/пергамин/, /пергамин/],
+    [/стяжк|цпс|цементно\s+песчан/, /стяжк|цпс|цементно\s+песчан/],
+    [/воронк|водосток|водоотвод|желоб/, /воронк|водосток|водоотвод|желоб/],
+    [/сэндвич|сендвич|профнастил|профлист|монолитн|железобетон/, /сэндвич|сендвич|профнастил|профлист|монолитн|железобетон/],
+  ];
+
+  return checks.some(([layerPattern, pdfPattern]) => layerPattern.test(layerText) && pdfPattern.test(pdf));
+}
+
 function layerMaterialTokens(layer: ProjectAiLayer) {
   return normalizeGroundingText(`${layer.material ?? ""} ${layer.role ?? ""}`)
     .split(" ")
     .filter((word) => word.length >= 4 && !/^\d+$/.test(word));
 }
 
-function isGroundedAiLayer(layer: ProjectAiLayer, pdfText: string) {
+function isExactlyGroundedAiLayer(layer: ProjectAiLayer, pdfText: string) {
   if (!hasGroundedSnippet(pdfText, layer.sourceText)) return false;
   const source = normalizeGroundingText(layer.sourceText);
   const tokens = layerMaterialTokens(layer);
@@ -581,26 +605,44 @@ function isGroundedAiLayer(layer: ProjectAiLayer, pdfText: string) {
   return tokens.some((token) => source.includes(token));
 }
 
+function isGroundedAiLayer(layer: ProjectAiLayer, pdfText: string) {
+  return isExactlyGroundedAiLayer(layer, pdfText) || hasPdfMaterialEvidence(layer, pdfText);
+}
+
 type SuccessfulProjectAiExtraction = Extract<ProjectAiExtraction, { status: "ok" }>;
+
+function hasPdfAreaEvidence(areaM2: number, pdfText: string) {
+  const pdf = normalizeGroundingText(pdfText);
+  const areaNumber = String(Math.round(areaM2));
+  const index = pdf.indexOf(areaNumber);
+  if (index < 0) return false;
+  const context = pdf.slice(Math.max(0, index - 120), Math.min(pdf.length, index + 120));
+  return /кров|roof|покрыт|площад/.test(context);
+}
 
 function isGroundedAiArea(extraction: SuccessfulProjectAiExtraction, pdfText: string) {
   if (!extraction.roofAreaM2 || extraction.roofAreaM2 <= 0) return false;
-  if (!hasGroundedSnippet(pdfText, extraction.roofAreaSource)) return false;
-  const source = normalizeGroundingText(extraction.roofAreaSource);
-  const areaText = String(Math.round(extraction.roofAreaM2));
-  const hasAreaNumber = source.includes(areaText) || source.includes(String(extraction.roofAreaM2).replace(".", " "));
-  return hasAreaNumber && /кров|roof|покрыт|площад/.test(source);
+  if (hasGroundedSnippet(pdfText, extraction.roofAreaSource)) {
+    const source = normalizeGroundingText(extraction.roofAreaSource);
+    const areaText = String(Math.round(extraction.roofAreaM2));
+    const hasAreaNumber = source.includes(areaText) || source.includes(String(extraction.roofAreaM2).replace(".", " "));
+    return hasAreaNumber && /кров|roof|покрыт|площад/.test(source);
+  }
+  return hasPdfAreaEvidence(extraction.roofAreaM2, pdfText);
 }
 
 function groundAiExtraction(extraction: ProjectAiExtraction, pdfText: string): ProjectAiExtraction {
   if (extraction.status !== "ok") return extraction;
 
   const layers = extraction.layers.filter((layer) => isGroundedAiLayer(layer, pdfText));
+  const exactLayers = extraction.layers.filter((layer) => isExactlyGroundedAiLayer(layer, pdfText));
   const rejectedLayers = extraction.layers.length - layers.length;
+  const looselyAcceptedLayers = layers.length - exactLayers.length;
   const groundedArea = isGroundedAiArea(extraction, pdfText);
   const warnings = [
     ...extraction.warnings,
     ...(rejectedLayers > 0 ? [`Rejected ${rejectedLayers} AI layer(s) without exact PDF grounding.`] : []),
+    ...(looselyAcceptedLayers > 0 ? [`Accepted ${looselyAcceptedLayers} AI layer(s) by material evidence in PDF.`] : []),
     ...(!groundedArea && extraction.roofAreaM2 ? ["Rejected AI roof area without exact PDF grounding."] : []),
   ];
 
@@ -1271,6 +1313,27 @@ function buildQuoteDraft(summary: {
   return lines.join("\n");
 }
 
+async function saveProjectEstimateLog(payload: Record<string, unknown>) {
+  try {
+    const supabase = getServiceSupabase();
+    const { data, error } = await supabase
+      .from("project_estimate_logs")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if (error) {
+      console.warn("project_estimate_logs insert skipped:", errorMessage(error));
+      return null;
+    }
+
+    return typeof data?.id === "string" ? data.id : null;
+  } catch (error) {
+    console.warn("project_estimate_logs insert failed:", errorMessage(error));
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
@@ -1419,9 +1482,37 @@ export async function POST(request: NextRequest) {
       notFound,
       projectOnly,
     });
+    const detectedLayers = layers.map((layer) => ({
+      role: layer.role,
+      material: layer.label,
+      quantityType: layer.quantityType,
+      areaOverride: layer.areaOverride ?? null,
+      unitCount: layer.unitCount ?? null,
+      note: layer.note ?? null,
+    }));
+    const projectEstimateLogId = await saveProjectEstimateLog({
+      source: "project-upload",
+      status: "estimated",
+      file_name: file.name,
+      direction,
+      question,
+      pages: parsed.numpages,
+      chars: extractedText.length,
+      area,
+      ai_extraction: groundedAiExtraction,
+      detected_layers: detectedLayers,
+      invoice_items: invoiceItems,
+      quote_items: quoteItems,
+      quote_draft: quoteDraft,
+      project_only: projectOnly,
+      not_found: notFound,
+      roof_fastener_guidance: roofFastenerGuidance,
+      roof_drain_guidance: roofDrainGuidance,
+    });
 
     return NextResponse.json({
       ok: true,
+      projectEstimateLogId,
       fileName: file.name,
       chars: extractedText.length,
       pages: parsed.numpages,
@@ -1429,14 +1520,7 @@ export async function POST(request: NextRequest) {
       question,
       projectQuery,
       area,
-      detectedLayers: layers.map((layer) => ({
-        role: layer.role,
-        material: layer.label,
-        quantityType: layer.quantityType,
-        areaOverride: layer.areaOverride ?? null,
-        unitCount: layer.unitCount ?? null,
-        note: layer.note ?? null,
-      })),
+      detectedLayers,
       aiExtraction: groundedAiExtraction,
       invoiceItems,
       quoteItems,

@@ -52,6 +52,9 @@ function getProvider(): ProjectAiProvider | null {
 }
 
 function getModel(provider: ProjectAiProvider) {
+  if (provider === "anthropic" && process.env.ANTHROPIC_MODEL) return process.env.ANTHROPIC_MODEL;
+  if (provider === "openrouter" && process.env.OPENROUTER_MODEL) return process.env.OPENROUTER_MODEL;
+  if (provider === "openai" && process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL;
   if (process.env.PROJECT_AI_MODEL) return process.env.PROJECT_AI_MODEL;
   if (provider === "anthropic") return "claude-3-haiku-20240307";
   if (provider === "openrouter") return "openai/gpt-4o-mini";
@@ -79,7 +82,7 @@ function compactSnippet(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function collectWindows(text: string, patterns: RegExp[], radius = 2200) {
+function collectWindows(text: string, patterns: RegExp[], radius = 3200) {
   const windows: Array<{ start: number; end: number }> = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -106,9 +109,13 @@ function collectWindows(text: string, patterns: RegExp[], radius = 2200) {
 }
 
 function selectRoofExtractionText(text: string) {
-  const maxChars = Number(process.env.PROJECT_AI_CONTEXT_CHARS ?? 18000);
+  const maxChars = Number(process.env.PROJECT_AI_CONTEXT_CHARS ?? 26000);
   const patterns = [
     /площадь\s+(?:кровли|покрытия|застройки)/gi,
+    /общие\s+данные|технико-экономические\s+показатели|тэпы/gi,
+    /экспликац[а-я\s-]*(?:кров|покрыт|полов)|ведомост[а-я\s-]*(?:кров|покрыт|материал)/gi,
+    /конструкци[а-я\s-]*(?:кров|покрыт)|пирог[а-я\s-]*(?:кров|покрыт)/gi,
+    /кровельн[а-я\s-]*(?:покрыт|ковер|материал)|состав\s+покрыт/gi,
     /спецификац[а-я\s-]*(?:кров|покрыт|ворон)/gi,
     /состав\s+кровл/gi,
     /тип\s+кровл/gi,
@@ -123,11 +130,16 @@ function selectRoofExtractionText(text: string) {
   const windows = collectWindows(text, patterns);
   if (!windows.length) return text.slice(0, maxChars);
 
-  let result = "";
+  const head = compactSnippet(text.slice(0, Math.min(text.length, 3500)));
+  const tail = compactSnippet(text.slice(Math.max(0, text.length - 2500)));
+  let result = head;
   for (const window of windows) {
     const next = compactSnippet(text.slice(window.start, window.end));
     if (result.length + next.length > maxChars) break;
     result += `${result ? "\n\n---\n\n" : ""}${next}`;
+  }
+  if (tail && result.length + tail.length <= maxChars) {
+    result += `${result ? "\n\n---\n\n" : ""}${tail}`;
   }
   return result || text.slice(0, maxChars);
 }
@@ -138,7 +150,7 @@ function buildPrompt(input: ExtractRoofProjectInput) {
     "Ты извлекаешь факты из PDF строительного проекта для предварительного расчета материалов.",
     "Верни ТОЛЬКО JSON без Markdown.",
     "Не подбирай и не выдумывай коды 1С. Не добавляй материалы, которых нет в тексте.",
-    "IMPORTANT: roofAreaSource and every layer.sourceText MUST be an exact substring copied from the PDF fragments below. If you cannot quote the exact text that contains the area/material, return null or skip the layer.",
+    "IMPORTANT: roofAreaSource and every layer.sourceText should be a short quote copied from the PDF fragments below. If table extraction breaks spacing, copy the closest fragment that contains the material words; do not paraphrase.",
     "Если площадь/толщина/количество не указаны явно, ставь null и confidence low/none.",
     "Для кровли отдельно выделяй разные типы кровли, слои пирога, площади, толщины, воронки и водосток.",
     "Если в тексте есть LOGICROOF, ТЕХНОРУФ, LOGICPIR, XPS/CARBON, Технобарьер, Унифлекс, Техноэласт, воронки или водосток, обязательно верни их в layers. Пустой layers допустим только если кровельных материалов в тексте нет.",
@@ -273,7 +285,7 @@ function buildAnthropicExtractionTool() {
 }
 
 async function getAvailableAnthropicModel(apiKey: string, currentModel: string) {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 90000);
   const response = await fetch("https://api.anthropic.com/v1/models", {
     method: "GET",
     signal: AbortSignal.timeout(timeoutMs),
@@ -294,7 +306,7 @@ async function getAvailableAnthropicModel(apiKey: string, currentModel: string) 
 }
 
 async function callAnthropic(prompt: string, apiKey: string, model: string): Promise<{ content: string; model: string; extraction?: unknown }> {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 90000);
   const body = {
     model,
     max_tokens: 2200,
@@ -340,7 +352,7 @@ async function callAnthropic(prompt: string, apiKey: string, model: string): Pro
 }
 
 async function callOpenAiCompatible(prompt: string, apiKey: string, model: string, provider: "openai" | "openrouter"): Promise<{ content: string; model: string }> {
-  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 60000);
+  const timeoutMs = Number(process.env.PROJECT_AI_TIMEOUT_MS ?? 90000);
   const url = provider === "openrouter"
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.openai.com/v1/chat/completions";
@@ -374,6 +386,18 @@ async function callOpenAiCompatible(prompt: string, apiKey: string, model: strin
   return { content: data.choices?.[0]?.message?.content ?? "", model };
 }
 
+async function runExtractionWithProvider(prompt: string, provider: ProjectAiProvider, apiKey: string, model: string) {
+  const result = provider === "anthropic"
+    ? await callAnthropic(prompt, apiKey, model)
+    : await callOpenAiCompatible(prompt, apiKey, model, provider);
+  if ("extraction" in result && result.extraction) {
+    return normalizeExtraction(result.extraction, provider, result.model);
+  }
+  const json = extractJsonObject(result.content);
+  if (!json) throw new Error("AI extractor returned no JSON object");
+  return normalizeExtraction(JSON.parse(json), provider, result.model);
+}
+
 export async function extractRoofProjectWithAi(input: ExtractRoofProjectInput): Promise<ProjectAiExtraction> {
   const provider = getProvider();
   if (!provider) return { status: "disabled", reason: "AI extractor provider/key is not configured" };
@@ -385,15 +409,36 @@ export async function extractRoofProjectWithAi(input: ExtractRoofProjectInput): 
 
   try {
     const prompt = buildPrompt(input);
-    const result = provider === "anthropic"
-      ? await callAnthropic(prompt, apiKey, model)
-      : await callOpenAiCompatible(prompt, apiKey, model, provider);
-    if ("extraction" in result && result.extraction) {
-      return normalizeExtraction(result.extraction, provider, result.model);
+    try {
+      return await runExtractionWithProvider(prompt, provider, apiKey, model);
+    } catch (primaryError) {
+      const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
+      if (provider !== "openrouter" && openRouterKey) {
+        const fallbackModel = getModel("openrouter");
+        try {
+          const extraction = await runExtractionWithProvider(prompt, "openrouter", openRouterKey, fallbackModel);
+          if (extraction.status === "ok") {
+            return {
+              ...extraction,
+              warnings: [
+                ...extraction.warnings,
+                `Primary ${provider} extractor failed, used OpenRouter fallback.`,
+              ],
+            };
+          }
+          return extraction;
+        } catch (fallbackError) {
+          throw new Error(
+            `Primary ${provider} failed: ${
+              primaryError instanceof Error ? primaryError.message : String(primaryError)
+            }; OpenRouter fallback failed: ${
+              fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+            }`
+          );
+        }
+      }
+      throw primaryError;
     }
-    const json = extractJsonObject(result.content);
-    if (!json) throw new Error("AI extractor returned no JSON object");
-    return normalizeExtraction(JSON.parse(json), provider, result.model);
   } catch (error) {
     return {
       status: "failed",
