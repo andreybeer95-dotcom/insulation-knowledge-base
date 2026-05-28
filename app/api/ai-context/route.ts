@@ -2100,6 +2100,11 @@ export async function GET(request: NextRequest) {
     }
 
     const preferredPvcCodes = [
+      ...(/ecoplast/i.test(rawQuery) ? [
+        'ЦВ000016044',
+        'ЦБ08796',
+        'ЦБ05312',
+      ] : []),
       ...(/logicroof|v[-\s]*rp/i.test(rawQuery) ? [
         'ЦБ15452',
         'ЦВ000009750',
