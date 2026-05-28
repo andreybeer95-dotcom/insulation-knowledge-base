@@ -988,7 +988,7 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
   return extraction.layers.map((layer, index): DetectedLayer | null => {
     const material = layer.material?.trim() || "";
     const role = layer.role?.trim() || "материал из проекта";
-    const text = `${role} ${material} ${layer.note ?? ""}`.toLowerCase();
+    const text = `${role} ${material} ${layer.sourceText ?? ""} ${layer.note ?? ""}`.toLowerCase();
     const thicknessMm = layer.thicknessMm ?? parseAiThickness(text);
     const areaOverride = aiLayerArea(layer);
     const note = aiLayerNote(layer);
