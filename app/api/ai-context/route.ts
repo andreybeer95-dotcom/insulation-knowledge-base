@@ -341,7 +341,8 @@ export async function GET(request: NextRequest) {
   // Extract numbers from rawQuery for product filtering
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
   const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
-  const hasCylinderQueryForNomenclature = /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп/i.test(rawQuery)
+  const hasCylinderQueryForNomenclature =
+    /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп|\bкф1\b|\bкф\b|\brwl\b|кв[-\s]*\d/i.test(rawQuery)
   const hasRoofProjectQueryForNomenclature =
     /кровл|крыша|скат|плоск|металлочерепиц|гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|пвх.*мембран|мембран.*пвх|logicroof|shinglas|шинглас/i.test(rawQuery)
   const hasPitchedRoofCoveringChoiceQuery =
@@ -1208,7 +1209,7 @@ export async function GET(request: NextRequest) {
       /\bsp\b/i.test(rawQuery) &&
       requestedSizeNumbers.length >= 2 &&
       !isAccessoryQuery
-    const isCylinderQuery = /цилиндр|цилиндры|скорлуп/i.test(rawQuery) || isImplicitXotpipeCylinderQuery
+    const isCylinderQuery = hasCylinderQueryForNomenclature || isImplicitXotpipeCylinderQuery
     if (isCylinderQuery) {
       nomQuery = nomQuery.ilike('name', '%цилиндр%')
     }
@@ -1477,6 +1478,28 @@ export async function GET(request: NextRequest) {
           .filter((item) => !relevantIds.has(item.id))
           .filter((item) => getNomenclatureItemType(item.name) === 'cylinder'))
           .slice(0, 20)
+      }
+
+      if (wantsAnalogInQuery && hasCylinderQueryForNomenclature) {
+        const [firstSize, secondSize] = requestedSizeNumbers
+        const { data: broadCylinderAnalogData } = await supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', `%${firstSize}%`)
+          .ilike('name', `%${secondSize}%`)
+          .limit(900)
+
+        const currentRelevantIds = new Set(relevant_nomenclature.map((item) => item.id))
+        const broadCylinderAnalogs = ((broadCylinderAnalogData ?? []) as NomenclatureItem[])
+          .filter((item) => !currentRelevantIds.has(item.id))
+          .filter((item) => getNomenclatureItemType(item.name) === 'cylinder')
+          .filter((item) => hasExactSize(item, firstSize, secondSize))
+          .filter((item) => matchesCylinderCoveringPreference(item.name))
+
+        nomenclature_analogs = dedupeNomenclature([
+          ...broadCylinderAnalogs,
+          ...nomenclature_analogs,
+        ]).slice(0, 20)
       }
     }
   }
