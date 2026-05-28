@@ -366,6 +366,15 @@ export async function GET(request: NextRequest) {
       hasRoofWoolQueryForNomenclature ||
       /мин\s*ват|минерал|каменн\w*\s+ват|baswool|басвул|rockwool|роквул|техновент|технофас|фасадн\w*\s+утеплител|утеплител\w*\s+(фасад|стен|кровл|сайдинг)/i.test(rawQuery)
     )
+  const hasBaswoolLightDirectQuery =
+    /baswool|басвул/i.test(rawQuery) && /лайт[-\s]*(?:35|45)?/i.test(rawQuery)
+  const hasBitumenRollDirectQuery =
+    /техноэласт|унифлекс|икопал|бикрост|линокром|биполь|эласт/i.test(rawQuery) &&
+    /эпп|экп/i.test(rawQuery)
+  const hasProfiledFoundationMembraneQuery =
+    /профилированн\w*\s+мембран|planter|плантер|grunter|грунтер/i.test(rawQuery)
+  const hasFacadeFastenerQueryForNomenclature =
+    /болгирус|bolgarys|фасадн\w*\s+(?:дюб|креп)|дюбел\w*\s+фасад|креп[её]ж\w*\s+фасад/i.test(rawQuery)
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcMembraneQueryForNomenclature =
@@ -1012,13 +1021,17 @@ export async function GET(request: NextRequest) {
   const getSizeFilters = (firstSize: string, secondSize: string) => [
     `name.ilike.% ${firstSize}x${secondSize}%`,
     `name.ilike.% ${firstSize}х${secondSize}%`,
+    `name.ilike.% ${firstSize}*${secondSize}%`,
     `name.ilike.% ${firstSize}-${secondSize}%`,
     `name.ilike.%(${firstSize}x${secondSize}%`,
     `name.ilike.%(${firstSize}х${secondSize}%`,
+    `name.ilike.%(${firstSize}*${secondSize}%`,
     `name.ilike.%(${firstSize}-${secondSize}%`,
+    `name.ilike.%${firstSize}*${secondSize}%`,
     `article.ilike.%${firstSize}-${secondSize}%`,
     `article.ilike.%${firstSize}x${secondSize}%`,
     `article.ilike.%${firstSize}х${secondSize}%`,
+    `article.ilike.%${firstSize}*${secondSize}%`,
   ]
 
   const hasExactSize = (item: NomenclatureItem, firstSize: string, secondSize: string) => {
@@ -1057,6 +1070,13 @@ export async function GET(request: NextRequest) {
     const rawGrade = text.match(/РУФ\s+[НВ]\s*(\d{2,3})/i)?.[1] ?? text.match(/РУФ\s*(\d{2,3})/i)?.[1]
     return rawGrade ? Number(rawGrade) : null
   }
+
+  const detectedNomenclatureBrandFromKeyword = Object.entries(nomenclatureBrandKeywordMap)
+    .find(([kw]) => queryLowerRaw.includes(kw))?.[1]
+  const detectedNomenclatureBrand =
+    detectedManufacturerId && brandNameMap[detectedManufacturerId]
+      ? brandNameMap[detectedManufacturerId]
+      : detectedNomenclatureBrandFromKeyword
 
   const sortBaswoolFacade = (items: NomenclatureItem[], preferredThicknesses: string[]) => {
     const thicknessPreference = preferredThicknesses.map(Number).filter(Boolean)
@@ -1141,13 +1161,7 @@ export async function GET(request: NextRequest) {
       .select('id, code, article, name, brand')
       .limit(20)
 
-    const nomBrandFromKeyword = Object.entries(nomenclatureBrandKeywordMap)
-      .find(([kw]) => queryLowerRaw.includes(kw))?.[1]
-
-    const nomBrand =
-      detectedManufacturerId && brandNameMap[detectedManufacturerId]
-        ? brandNameMap[detectedManufacturerId]
-        : nomBrandFromKeyword
+    const nomBrand = detectedNomenclatureBrand
     if (nomBrand) {
       nomQuery = nomQuery.eq('brand', nomBrand)
     }
@@ -1464,6 +1478,181 @@ export async function GET(request: NextRequest) {
           .filter((item) => getNomenclatureItemType(item.name) === 'cylinder'))
           .slice(0, 20)
       }
+    }
+
+    if (hasBaswoolLightDirectQuery) {
+      const requestedLightDensity =
+        rawQuery.match(/лайт[-\s]*(35|45)/i)?.[1] ??
+        (/\b45\b/i.test(rawQuery) ? '45' : /\b35\b/i.test(rawQuery) ? '35' : null)
+      const requestedLightThicknesses = constructionThicknesses
+        .filter((value) => !requestedLightDensity || value !== requestedLightDensity)
+
+      const [{ data: baswoolLightData }, { data: rockwoolLightData }] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .eq('brand', 'BASWOOL')
+          .or('name.ilike.%ЛАЙТ-35%,name.ilike.%ЛАЙТ-45%,name.ilike.%ЛАЙТ 35%,name.ilike.%ЛАЙТ 45%,name.ilike.%ЛАЙТ%')
+          .limit(120),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%ЛАЙТ БАТТС%,name.ilike.%LIGHT BATTS%,name.ilike.%СКАНДИК%,name.ilike.%АКУСТИК БАТТС%')
+          .limit(120),
+      ])
+
+      const matchesLightRequest = (item: NomenclatureItem) => {
+        const density = getBaswoolLightDensity(item.name)
+        const densityOk = !requestedLightDensity || density === Number(requestedLightDensity)
+        const thicknessOk = requestedLightThicknesses.length === 0 ||
+          requestedLightThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+        return densityOk && thicknessOk
+      }
+
+      const baswoolLightItems = sortBaswoolLight(
+        ((baswoolLightData ?? []) as NomenclatureItem[]).filter(matchesLightRequest),
+        requestedLightThicknesses.length > 0 ? requestedLightThicknesses : ['100', '50', '150']
+      )
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...baswoolLightItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+
+      const relevantIds = new Set(relevant_nomenclature.map((item) => item.id))
+      nomenclature_analogs = dedupeNomenclature([
+        ...((rockwoolLightData ?? []) as NomenclatureItem[])
+          .filter((item) => !relevantIds.has(item.id))
+          .filter((item) =>
+            requestedLightThicknesses.length === 0 ||
+            requestedLightThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
+          ),
+        ...nomenclature_analogs,
+      ]).slice(0, 20)
+    }
+
+    if (hasBitumenRollDirectQuery) {
+      const requestedBitumenType = /экп/i.test(rawQuery) ? 'ЭКП' : 'ЭПП'
+      const requestedBitumenSeries =
+        rawQuery.match(/техноэласт|унифлекс|икопал|бикрост|линокром|биполь/i)?.[0] ?? null
+      const { data: bitumenData } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .ilike('name', `%${requestedBitumenType}%`)
+        .limit(900)
+
+      const isBitumenRollCandidate = (item: NomenclatureItem) => {
+        const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+        return new RegExp(requestedBitumenType, 'i').test(text) &&
+          /техноэласт|унифлекс|икопал|бикрост|линокром|биполь|эласт|рулон|наплав/i.test(text) &&
+          !/праймер|мастик|клей|аэратор|воронк|геотекст|утепл|xps/i.test(text)
+      }
+
+      const bitumenItems = dedupeNomenclature(((bitumenData ?? []) as NomenclatureItem[])
+        .filter(isBitumenRollCandidate))
+      const sourceItems = requestedBitumenSeries
+        ? bitumenItems.filter((item) => new RegExp(requestedBitumenSeries, 'i').test(item.name || ''))
+        : bitumenItems
+      const sourceIds = new Set(sourceItems.map((item) => item.id))
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...sourceItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_analogs = dedupeNomenclature([
+        ...bitumenItems.filter((item) => !sourceIds.has(item.id)),
+        ...nomenclature_analogs,
+      ]).slice(0, 30)
+    }
+
+    if (hasProfiledFoundationMembraneQuery) {
+      const [planterRes, grunterRes, profiledRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%PLANTER%,name.ilike.%ПЛАНТЕР%')
+          .limit(120),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%ГРУНТЕР%,name.ilike.%GRUNTER%')
+          .limit(120),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', '%профилирован%')
+          .ilike('name', '%мембран%')
+          .limit(160),
+      ])
+
+      const profiledMembraneItems = dedupeNomenclature([
+        ...((planterRes.data ?? []) as NomenclatureItem[]),
+        ...((grunterRes.data ?? []) as NomenclatureItem[]),
+        ...((profiledRes.data ?? []) as NomenclatureItem[]),
+      ]).filter((item) =>
+        /planter|плантер|grunter|грунтер|профилирован/i.test(item.name || '') &&
+        /мембран|planter|grunter/i.test(item.name || '') &&
+        !/пвх|logicroof|ecoplast|геотекст|техноэласт|унифлекс/i.test(item.name || '')
+      )
+
+      const requestedItems = profiledMembraneItems.filter((item) =>
+        (/planter|плантер/i.test(rawQuery) && /planter|плантер/i.test(item.name || '')) ||
+        (/grunter|грунтер/i.test(rawQuery) && /grunter|грунтер/i.test(item.name || ''))
+      )
+      const primaryProfiledItems = requestedItems.length > 0 ? requestedItems : profiledMembraneItems
+      const primaryIds = new Set(primaryProfiledItems.map((item) => item.id))
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...primaryProfiledItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_analogs = dedupeNomenclature([
+        ...profiledMembraneItems.filter((item) => !primaryIds.has(item.id)),
+        ...nomenclature_analogs,
+      ]).slice(0, 20)
+    }
+
+    if (hasFacadeFastenerQueryForNomenclature) {
+      const [bolgirusRes, facadeDowelRes, insulationDowelRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%Болгирус%,name.ilike.%BOLGARYS%,name.ilike.%Bolgarys%')
+          .limit(80),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', '%дюб%')
+          .ilike('name', '%фасад%')
+          .limit(180),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .ilike('name', '%дюб%')
+          .ilike('name', '%изоляц%')
+          .limit(180),
+      ])
+
+      const fastenerItems = dedupeNomenclature([
+        ...((bolgirusRes.data ?? []) as NomenclatureItem[]),
+        ...((facadeDowelRes.data ?? []) as NomenclatureItem[]),
+        ...((insulationDowelRes.data ?? []) as NomenclatureItem[]),
+      ]).filter((item) =>
+        /болгирус|bolgarys|дюб|креп/i.test(item.name || '') &&
+        !/силма/i.test(item.name || '')
+      )
+      const bolgirusItems = fastenerItems.filter((item) => /болгирус|bolgarys/i.test(item.name || ''))
+      const primaryFasteners = bolgirusItems.length > 0 ? bolgirusItems : []
+      const primaryIds = new Set(primaryFasteners.map((item) => item.id))
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...primaryFasteners,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_analogs = dedupeNomenclature([
+        ...fastenerItems.filter((item) => !primaryIds.has(item.id)),
+        ...nomenclature_analogs,
+      ]).slice(0, 30)
     }
 
     requested_invoice_lines = extractRequestedInvoiceLines()
