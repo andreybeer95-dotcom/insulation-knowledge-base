@@ -1883,6 +1883,27 @@ function buildQuoteItems(invoiceItems: InvoiceItem[]): QuoteItem[] {
   });
 }
 
+function buildPendingQuantityLines(notFound: ReviewItem[]) {
+  const lines: string[] = [];
+
+  for (const item of notFound) {
+    const text = `${item.role} ${item.requestedLayer} ${item.material ?? ""}`.toLowerCase();
+    const calculation = item.calculation.replace(/\.$/, "");
+    if (!/\d/.test(calculation) || !/(?:м2|м²|м3|м³|шт|рул|уп)/i.test(calculation)) continue;
+
+    if (/logicroof|лоджикруф|пвх-мембран|пвх мембран/.test(text)) {
+      lines.push(`- ${item.requestedLayer}: ${calculation}. Уточнить толщину мембраны 1,2 / 1,5 / 1,8 / 2,0 мм; после выбора толщины подобрать точный код 1С и рулоны.`);
+      continue;
+    }
+
+    if (/гидроветрозащит|гидро.?ветрозащит|ветрозащит/.test(text)) {
+      lines.push(`- ${item.requestedLayer}: ${calculation}. Уточнить марку/тип мембраны и допустимость в этой кровельной системе; после этого подобрать код 1С.`);
+    }
+  }
+
+  return lines;
+}
+
 function buildQuoteDraft(summary: {
   fileName: string;
   area: AreaInfo;
@@ -1962,6 +1983,13 @@ function buildQuoteDraft(summary: {
     lines.push(`- мембрана по полю: ${rates.membraneFieldKitsPerM2} комплект/м2 × ${summary.area.value} м2 = ${membraneFasteners} комплектов;`);
     lines.push(`- общий ориентир поля: ${rates.totalFieldFastenersPerM2} крепежных комплектов/м2 × ${summary.area.value} м2 = ${totalFasteners} шт/комплектов.`);
     lines.push("Финально крепеж считать по ветровому расчету: краевые, угловые и периметральные зоны могут потребовать больше.");
+  }
+
+  const pendingQuantityLines = buildPendingQuantityLines(summary.notFound);
+  if (pendingQuantityLines.length) {
+    lines.push("");
+    lines.push("К расчету после уточнения:");
+    lines.push(...pendingQuantityLines);
   }
 
   const funnelAlternativeSources = [
@@ -2158,6 +2186,10 @@ export async function POST(request: NextRequest) {
       } else {
         const missingReason = layer.reviewOnly
           ? layer.note ?? "Позиция найдена как возможный вариант, но требует согласования перед включением в КП."
+          : layer.key === "pvc_logicroof_vrp" && !layer.thicknessMm
+            ? "Количество мембраны рассчитано в м2; в счет не ставить, пока менеджер не уточнит толщину 1,2/1,5/1,8/2,0 мм и точную позицию 1С."
+            : layer.key === "hydrowind_membrane" && !layer.searchTerms.length
+              ? "Количество мембраны рассчитано в м2; в счет не ставить, пока менеджер не уточнит марку/тип и допустимость в этой кровельной системе."
           : requiresProjectQuantity
             ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
             : requiresMeasuredQuantity
