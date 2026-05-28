@@ -309,6 +309,15 @@ function findPlastfoilMaterialMatch(text: string, pattern: RegExp) {
   return best ?? (fallbackIndex >= 0 ? { index: fallbackIndex } : null);
 }
 
+function parsePlastfoilThicknessNear(text: string, index: number) {
+  const context = text.slice(index, index + 180);
+  const explicitMm = context.match(/(?:plastfoil|пластфойл|classic|classi[сc]|art)[\s\S]{0,90}?(\d(?:[,.]\d)?)\s*мм/i);
+  if (explicitMm?.[1]) return toNumber(explicitMm[1]);
+
+  const sizeLike = context.match(/\((\d(?:[,.]\d)?)\s*[xх*]\s*\d{3,5}/i);
+  return sizeLike?.[1] ? toNumber(sizeLike[1]) : undefined;
+}
+
 function detectPlastfoilLayers(lower: string): DetectedLayer[] {
   const layers: DetectedLayer[] = [];
   const classicMatch = findPlastfoilMaterialMatch(lower, /plastfoil\s+classic|пластфойл[\s\S]{0,30}classic/i);
@@ -316,19 +325,28 @@ function detectPlastfoilLayers(lower: string): DetectedLayer[] {
 
   if (classicMatch) {
     const area = classicMatch.area;
+    const thicknessMm = parsePlastfoilThicknessNear(lower, classicMatch.index) ?? 1.2;
+    const thicknessRu = String(thicknessMm).replace(".", ",");
     layers.push({
       key: "pvc_plastfoil_classic",
       role: "кровельная ПВХ-мембрана",
-      label: "Plastfoil Classic 1,2 мм",
+      label: `Plastfoil Classic ${thicknessRu} мм`,
       detected: true,
-      searchTerms: ["PLASTFOIL classic", "ПЛАСТФОЙЛ classic", "Plastfoil Classic", "ПЛАСТФОЙЛ"],
+      searchTerms: [
+        `PLASTFOIL classic ${thicknessRu}`,
+        `Plastfoil Classic ${thicknessMm}`,
+        "PLASTFOIL classic",
+        "ПЛАСТФОЙЛ classic",
+        "Plastfoil Classic",
+        "ПЛАСТФОЙЛ",
+      ],
       factor: 1.15,
-      thicknessMm: 1.2,
+      thicknessMm,
       areaOverride: area,
       quantityType: "m2",
       note: area
         ? "Площадь Plastfoil Classic взята из спецификации элементов кровли. В примечании проекта указано, что объем дан без учета раскладки и раскроя; расчет рулонов сделан с коэффициентом 1,15."
-        : "В проекте указана Plastfoil Classic 1,2 мм, но площадь в строке спецификации не распознана.",
+        : `В проекте указана Plastfoil Classic ${thicknessRu} мм, но площадь в строке спецификации не распознана.`,
     });
   }
 
@@ -995,6 +1013,27 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
     const isProjectOnly = Boolean(layer.projectOnly);
     const unitCount = (layer.unit === "шт" || layer.quantityType === "шт") && layer.quantity ? layer.quantity : undefined;
 
+    if (/plastfoil|пластфойл/.test(text)) {
+      const isArt = /\bart\b|®\s*art|неармирован/i.test(text);
+      const thicknessRu = thicknessMm ? String(thicknessMm).replace(".", ",") : "";
+      return {
+        key: isArt ? `pvc_plastfoil_art_ai_${index}` : `pvc_plastfoil_classic_ai_${index}`,
+        role: isArt ? "дополнительная неармированная ПВХ-мембрана для примыканий" : "кровельная ПВХ-мембрана",
+        label: `${isArt ? "Plastfoil Art" : "Plastfoil Classic"}${thicknessRu ? ` ${thicknessRu} мм` : ""}`,
+        detected: true,
+        searchTerms: [
+          `${isArt ? "PLASTFOIL ART" : "PLASTFOIL classic"} ${thicknessRu}`.trim(),
+          isArt ? "PLASTFOIL ART" : "PLASTFOIL classic",
+          material,
+        ].filter(Boolean),
+        factor: 1.15,
+        thicknessMm,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
     if (/logicroof\s+v-rp|пвх[а-я\s-]*мембран/.test(text)) {
       return {
         key: "pvc_logicroof_vrp",
@@ -1009,6 +1048,24 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
         areaOverride,
         quantityType: "m2",
         note,
+      };
+    }
+
+    if (/isover|изовер|dirock|дирок|минераловатн[а-я\s-]*(?:ват|утеплител)|руф\s*[вн]/i.test(text)) {
+      const isUpper = /руф\s*в|ruf\s*v|верхн/i.test(text);
+      const label = thicknessMm ? `${material || "Минераловатный утеплитель кровли"} ${thicknessMm} мм` : material || "Минераловатный утеплитель кровли";
+      return {
+        key: `ai_roof_mw_${isUpper ? "upper" : "lower"}_${thicknessMm ?? "unknown"}_${index}`,
+        role: isUpper ? "верхний слой минераловатного утепления кровли" : "нижний слой минераловатного утепления кровли",
+        label,
+        detected: true,
+        searchTerms: [label, material].filter(Boolean),
+        factor: 1.03,
+        thicknessMm,
+        areaOverride,
+        quantityType: thicknessMm ? "m3" : "m2",
+        reviewOnly: true,
+        note: `${note} Проектный бренд/марку не заменять автоматически; предложить аналог из нашей базы только на согласование.`,
       };
     }
 
@@ -1197,6 +1254,8 @@ function layerFamily(layer: DetectedLayer) {
   const text = `${layer.role} ${layer.label}`.toLowerCase();
 
   if (key === "pvc_logicroof_vrp") return "pvc_logicroof_vrp";
+  if (key.includes("pvc_plastfoil_classic") || text.includes("plastfoil classic")) return "pvc_plastfoil_classic";
+  if (key.includes("pvc_plastfoil_art") || text.includes("plastfoil art")) return "pvc_plastfoil_art";
   if (key === "technobarrier") return "technobarrier";
   if (key === "uniflex_epp") return "uniflex_epp";
   if (key === "technoelast_epp") return "technoelast_epp";
@@ -1207,6 +1266,7 @@ function layerFamily(layer: DetectedLayer) {
   if (key.includes("roof_funnel") || text.includes("воронк")) return "roof_funnel";
   if (key.includes("logicpir_prof") || text.includes("logicpir prof")) return `logicpir_prof_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
   if (key.includes("technoruf") || text.includes("техноруф")) return `technoruf_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
+  if (key.includes("roof_mw") || text.includes("isover") || text.includes("изовер") || text.includes("dirock") || text.includes("дирок") || text.includes("минераловатн")) return `roof_mw_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}_${isUpperRoofWoolLayer(layer) ? "upper" : "lower"}`;
   if (key.includes("xps") || text.includes("xps") || text.includes("carbon")) return `xps_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
 
   return null;
@@ -1337,16 +1397,24 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   }
   if (layer.key === "pvc_logicroof_vrp" && /arctic|arctiс/i.test(item.name ?? "") && !/arctic|arctiс/i.test(requested)) score -= 20;
   if (layer.key === "pvc_logicroof_vrp" && /2[,.]10\s*[xх]\s*20/i.test(item.name ?? "")) score += 4;
-  if (layer.key === "pvc_plastfoil_classic" && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
-  if (layer.key === "pvc_plastfoil_classic" && /classic|classi[сc]/i.test(item.name ?? "")) score += 16;
-  if (layer.key === "pvc_plastfoil_classic" && /1[,.]2/i.test(item.name ?? "")) score += 24;
-  if (layer.key === "pvc_plastfoil_classic" && /eco|geo|polar|light|art|lay/i.test(item.name ?? "")) score -= 12;
-  if (layer.key === "pvc_plastfoil_art" && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
-  if (layer.key === "pvc_plastfoil_art" && /\bart\b|®\s*art/i.test(item.name ?? "")) score += 22;
-  if (layer.key === "pvc_plastfoil_art" && /неармирован/i.test(item.name ?? "")) score += 8;
-  if (layer.key === "pvc_plastfoil_art" && /1[,.]5/i.test(item.name ?? "")) score += 18;
-  if (layer.key === "pvc_plastfoil_art" && /40\s*м2|2000\s*[xх*]\s*20000/i.test(item.name ?? "")) score += 5;
-  if (layer.key === "pvc_plastfoil_art" && /classic|eco|geo|polar|light|lay/i.test(item.name ?? "")) score -= 12;
+  if (layer.key.startsWith("pvc_plastfoil_classic") && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
+  if (layer.key.startsWith("pvc_plastfoil_classic") && /classic|classi[сc]/i.test(item.name ?? "")) score += 16;
+  if (layer.key.startsWith("pvc_plastfoil_classic") && layer.thicknessMm) {
+    const desiredThickness = String(layer.thicknessMm).replace(".", "[,.]");
+    const hasDesiredThickness = new RegExp(`${desiredThickness}\\s*(?:мм|mm)?|\\(${desiredThickness}\\s*[xх*]`).test(name);
+    const itemThickness = name.match(/(?:^|\s|\()(1[,.][258]|2[,.]0|2)\s*(?:мм|mm|[xх*])?/i)?.[1]?.replace(",", ".");
+    if (hasDesiredThickness) score += 34;
+    if (itemThickness && itemThickness !== String(layer.thicknessMm)) score -= 80;
+  } else if (layer.key.startsWith("pvc_plastfoil_classic") && /1[,.]2/i.test(item.name ?? "")) {
+    score += 24;
+  }
+  if (layer.key.startsWith("pvc_plastfoil_classic") && /eco|geo|polar|light|art|lay/i.test(item.name ?? "")) score -= 12;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /\bart\b|®\s*art/i.test(item.name ?? "")) score += 22;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /неармирован/i.test(item.name ?? "")) score += 8;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /1[,.]5/i.test(item.name ?? "")) score += 18;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /40\s*м2|2000\s*[xх*]\s*20000/i.test(item.name ?? "")) score += 5;
+  if (layer.key.startsWith("pvc_plastfoil_art") && /classic|eco|geo|polar|light|lay/i.test(item.name ?? "")) score -= 12;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
   if (layer.key.startsWith("logicpir_prof") && /logicpir/i.test(item.name ?? "") && /prof/i.test(item.name ?? "")) score += 16;
@@ -1397,6 +1465,19 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (name.includes("пламя стоп")) score -= 5;
   if (/в м3|в м2|сто|пал|уп/i.test(item.name ?? "")) score += 1;
   return score;
+}
+
+function hasCriticalThicknessMismatch(layer: DetectedLayer, item: NomenclatureItem | null) {
+  if (!item?.name || !layer.thicknessMm) return false;
+  if (
+    layer.key !== "pvc_logicroof_vrp" &&
+    !layer.key.startsWith("pvc_plastfoil_classic") &&
+    !layer.key.startsWith("pvc_plastfoil_art")
+  ) return false;
+
+  const name = item.name.toLowerCase();
+  const itemThickness = name.match(/(?:^|\s|\()(1[,.][258]|2[,.]0|2)\s*(?:мм|mm|[xх*])?/i)?.[1]?.replace(",", ".");
+  return Boolean(itemThickness && itemThickness !== String(layer.thicknessMm));
 }
 
 async function findNomenclature(layer: DetectedLayer) {
@@ -1549,13 +1630,13 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
 
 function isRoofWoolProjectLayer(layer: DetectedLayer) {
   const text = `${layer.key} ${layer.role} ${layer.label}`.toLowerCase();
-  return /technoruf|технор[уо]ф|dirock|дирок|минераловатн|roof_mw/i.test(text)
+  return /technoruf|технор[уо]ф|dirock|дирок|isover|изовер|минераловатн|roof_mw/i.test(text)
     && /кровл|руф|roof|теплоизоляц/i.test(text);
 }
 
 function isUpperRoofWoolLayer(layer: DetectedLayer) {
   const text = `${layer.key} ${layer.role} ${layer.label}`.toLowerCase();
-  return /верхн|_в|в\s*(?:60|проф|экстра|оптима)|в60/i.test(text);
+  return /верхн|руф\s*в|ruf\s*v|_в|в\s*(?:60|проф|экстра|оптима)|в60/i.test(text);
 }
 
 function roofWoolAnalogTerms(layer: DetectedLayer) {
@@ -1685,11 +1766,12 @@ function detectProjectSystemContext(text: string, layers: DetectedLayer[]): Proj
     hasLayer("pirromembrane_70") ||
     layers.some((layer) => layer.key.startsWith("logicpir_"));
   const hasStoneWoolLayer =
-    /dirock|дирок|техноруф|минераловатн/i.test(lower) ||
+    /dirock|дирок|isover|изовер|техноруф|минераловатн/i.test(lower) ||
     hasLayer("dirock_ruf_n_60") ||
     layers.some((layer) => layer.key.startsWith("technoruf_"));
   const hasPenoplexKombi =
-    /комби\s*(?:pir|пир)|пеноплекс[\s\S]{0,120}комби|plastfoil\s+classic|пластфойл[\s\S]{0,40}classic/i.test(lower);
+    /комби\s*(?:pir|пир)|пеноплекс[\s\S]{0,120}комби/i.test(lower) ||
+    (/plastfoil\s+classic|пластфойл[\s\S]{0,40}classic/i.test(lower) && /pirromembrane|pirro|пирро|dirock|дирок/i.test(lower));
 
   const directSystems: Array<{ id: string; name: string; pattern: RegExp }> = [
     {
@@ -2128,11 +2210,15 @@ export async function POST(request: NextRequest) {
         groundedAiExtraction.roofAreaConfidence !== "none" &&
         (area.source === "not_found" || area.source === "axes_estimate" || area.confidence === "low")
       ) {
+        const aiAreaSource = groundedAiExtraction.roofAreaSource ?? "";
+        const isBuildingFootprintArea = /площад[ьи]\s+застройки/i.test(aiAreaSource);
         area = {
           value: round(groundedAiExtraction.roofAreaM2, 2),
           source: "pdf_text",
-          confidence: groundedAiExtraction.roofAreaConfidence === "high" ? "high" : "medium",
-          note: `Площадь кровли извлечена AI-экстрактором из PDF. ${groundedAiExtraction.roofAreaSource ?? "Перед счетом сверить с ведомостью/планом кровли."}`,
+          confidence: isBuildingFootprintArea ? "low" : groundedAiExtraction.roofAreaConfidence === "high" ? "high" : "medium",
+          note: isBuildingFootprintArea
+            ? `AI нашел площадь застройки как запасной ориентир: ${aiAreaSource}. Для счета нужна площадь кровли/покрытия по проекту или плану кровли.`
+            : `Площадь кровли извлечена AI-экстрактором из PDF. ${aiAreaSource || "Перед счетом сверить с ведомостью/планом кровли."}`,
         };
       }
     }
@@ -2167,8 +2253,9 @@ export async function POST(request: NextRequest) {
       const quantity = buildQuantity(layer, area, primary);
       const requiresProjectQuantity = layer.key.startsWith("roof_funnel") && !layer.unitCount;
       const requiresMeasuredQuantity = layer.quantityType !== "project" && quantity.value === null;
+      const hasThicknessMismatch = hasCriticalThicknessMismatch(layer, primary);
 
-      if (primary?.code && !layer.reviewOnly && !requiresProjectQuantity && !requiresMeasuredQuantity) {
+      if (primary?.code && !layer.reviewOnly && !requiresProjectQuantity && !requiresMeasuredQuantity && !hasThicknessMismatch) {
         invoiceItems.push({
           role: layer.role,
           material: primary.name,
@@ -2186,6 +2273,8 @@ export async function POST(request: NextRequest) {
       } else {
         const missingReason = layer.reviewOnly
           ? layer.note ?? "Позиция найдена как возможный вариант, но требует согласования перед включением в КП."
+          : hasThicknessMismatch
+            ? "Код 1С найден только для другой толщины; в счет без точной толщины из проекта не ставить."
           : layer.key === "pvc_logicroof_vrp" && !layer.thicknessMm
             ? "Количество мембраны рассчитано в м2; в счет не ставить, пока менеджер не уточнит толщину 1,2/1,5/1,8/2,0 мм и точную позицию 1С."
             : layer.key === "hydrowind_membrane" && !layer.searchTerms.length
