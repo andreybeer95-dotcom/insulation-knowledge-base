@@ -461,6 +461,10 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const mainPvcMembraneArea = plastfoilLayers.find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride
     ?? (roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined);
   const hasParobarrierCa500 = /паробарьер\s*[сc][аa]\s*500|[сc][аa]\s*500/i.test(lower);
+  const hasParobarrierC = /паробарьер\s*[сc](?![аa]\s*500)/i.test(lower);
+  const hasTechnobarrier = /технобарьер/i.test(lower);
+  const hasExactHydrowindMembrane =
+    /альфа\s+(?:вент|топ)|мастер\s+вент|georex|гидро-?ветрозащитн[\s\S]{0,80}технониколь|технониколь[\s\S]{0,80}гидро-?ветрозащитн/i.test(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
     /наружн[а-я\s-]*организованн[а-я\s-]*водосток/i,
     /водосточн[а-я\s-]*желоб/i,
@@ -601,27 +605,45 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     {
       key: "technobarrier",
       role: "пароизоляция",
-      label: hasParobarrierCa500 ? "Паробарьер СА500" : "ТЕХНОБАРЬЕР / Паробарьер C",
+      label: hasParobarrierCa500
+        ? "Паробарьер СА500"
+        : hasParobarrierC && !hasTechnobarrier
+          ? "Паробарьер C"
+          : hasTechnobarrier && !hasParobarrierC
+            ? "ТЕХНОБАРЬЕР"
+            : "ТЕХНОБАРЬЕР / Паробарьер C",
       detected: includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i, /паробарьер\s*[сc][аa]\s*500/i]),
       searchTerms: hasParobarrierCa500
         ? ["Паробарьер СА 500", "Паробарьер СА500", "Паробарьер"]
-        : ["ТЕХНОБАРЬЕР", "Паробарьер C", "Паробарьер"],
+        : hasParobarrierC && !hasTechnobarrier
+          ? ["Паробарьер С", "Паробарьер C", "Паробарьер"]
+          : hasTechnobarrier && !hasParobarrierC
+            ? ["ТЕХНОБАРЬЕР"]
+            : ["ТЕХНОБАРЬЕР", "Паробарьер С", "Паробарьер C", "Паробарьер"],
       factor: 1.12,
       areaOverride: mainPvcMembraneArea,
       quantityType: "m2",
       note: hasParobarrierCa500
         ? "В проекте найден Паробарьер СА500; количество посчитано по основной площади ПВХ-мембраны, перед КП сверить по узлам и нахлестам."
-        : "Марку пароизоляции сверить: в разных местах проекта указаны ТЕХНОБАРЬЕР и Паробарьер C.",
+        : hasParobarrierC && !hasTechnobarrier
+          ? "В проекте найден Паробарьер C; перед КП сверить точную модификацию и ширину рулона."
+          : hasTechnobarrier && !hasParobarrierC
+            ? "В проекте найден ТЕХНОБАРЬЕР; перед КП сверить точную модификацию."
+            : "Марку пароизоляции сверить: в разных местах проекта указаны ТЕХНОБАРЬЕР и Паробарьер C.",
     },
     {
       key: "hydrowind_membrane",
       role: "гидроветрозащитная мембрана",
       label: "Гидроветрозащитная мембрана",
       detected: includesAny(lower, [/гидро\s*ветрозащитн[а-я\s-]*мембран/i, /гидроветрозащитн[а-я\s-]*мембран/i]),
-      searchTerms: ["Гидроветрозащитная мембрана", "Гидро-ветрозащитная мембрана", "Ветрозащитная мембрана"],
+      searchTerms: hasExactHydrowindMembrane
+        ? ["Гидроветрозащитная мембрана", "Гидро-ветрозащитная мембрана", "Ветрозащитная мембрана"]
+        : [],
       factor: 1.15,
       quantityType: "m2",
-      note: "Тип мембраны и допустимость применения в кровельном пироге сверить по проекту/системе.",
+      note: hasExactHydrowindMembrane
+        ? "Тип мембраны и допустимость применения в кровельном пироге сверить по проекту/системе."
+        : "В проекте указана общая гидроветрозащитная мембрана без марки; конкретный код 1С в счет не ставить без уточнения типа мембраны.",
     },
     {
       key: "profiled_sheet_n57",
