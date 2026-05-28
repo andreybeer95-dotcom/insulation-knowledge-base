@@ -3696,9 +3696,10 @@ export async function GET(request: NextRequest) {
     formattedContext += '\n\n## Правила подбора\n' + rulesText;
   }
 
+  const shouldSuppressNomenclatureForSystemContext = hasAnySystemQueryForContext && !hasPvcAccessoryOnlyQuery
   const shortInvoiceItems = strictInvoiceMode
     ? requested_invoice_items
-    : hasAnySystemQueryForContext
+    : shouldSuppressNomenclatureForSystemContext
     ? []
     : requested_invoice_items.length > 0
     ? requested_invoice_items
@@ -3741,7 +3742,7 @@ export async function GET(request: NextRequest) {
     ...invoiceStatusLines,
     '',
     '## Основные позиции 1С',
-    ...(hasAnySystemQueryForContext
+    ...(shouldSuppressNomenclatureForSystemContext
       ? ['- Системные позиции и коды 1С переданы в rules по ролям выбранной системы.']
       : shortInvoiceItems.length > 0
       ? shortInvoiceItems.slice(0, 8).map((n) => {
@@ -3769,7 +3770,7 @@ export async function GET(request: NextRequest) {
       ? [strictInvoiceWantsAnalogs
           ? '- Аналоги выводить только из блока analogs отдельными кандидатами; сопутствующие сверх запроса не добавлять без согласования.'
           : '- В режиме проверки строк счета не добавлять сопутствующие/аналоги сверх запроса без отдельного согласования.']
-      : hasAnySystemQueryForContext
+      : shouldSuppressNomenclatureForSystemContext
       ? ['- Сопутствующие брать из состава выбранной системы в rules; не добавлять общее из поиска.']
       : nomenclature_accessories.length > 0
       ? nomenclature_accessories.slice(0, 6).map((n) => {
@@ -3842,8 +3843,8 @@ export async function GET(request: NextRequest) {
       .slice(0, hasAnySystemQueryForContext ? 8 : 5),
   ]
   const compactChunks = shouldUseCompactResponse ? [] : chunks
-  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : hasAnySystemQueryForContext ? [] : relevant_nomenclature
-  const accessoriesForTool = strictInvoiceMode || hasAnySystemQueryForContext ? [] : nomenclature_accessories
+  const mainItemsForTool = strictInvoiceMode ? requested_invoice_items : shouldSuppressNomenclatureForSystemContext ? [] : relevant_nomenclature
+  const accessoriesForTool = strictInvoiceMode || shouldSuppressNomenclatureForSystemContext ? [] : nomenclature_accessories
 
   if (toolResponseMode) {
     return NextResponse.json({
