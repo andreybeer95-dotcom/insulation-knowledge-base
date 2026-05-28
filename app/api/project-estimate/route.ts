@@ -478,7 +478,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       role: "нижний минераловатный слой утепления кровли",
       label: "Dirock РУФ Н 115 кг/м3, 60 мм",
       detected: includesAny(lower, [/dirock\s+руф\s+н[\s\S]{0,120}?60\s*мм/i]),
-      searchTerms: ["ТЕХНОРУФ Н ПРОФ 60", "ТЕХНОРУФ Н 60", "Dirock РУФ Н 60"],
+      searchTerms: ["ТЕХНОРУФ Н ПРОФ 1200х600х60", "ТЕХНОРУФ Н ПРОФ 60", "ТЕХНОРУФ Н 60", "Dirock РУФ Н 60"],
       factor: 1.03,
       thicknessMm: 60,
       areaOverride: mainPvcMembraneArea,
@@ -1348,13 +1348,14 @@ async function findNomenclature(layer: DetectedLayer) {
   const supabase = getServiceSupabase();
   const found = new Map<string, NomenclatureItem>();
   let hadSupabaseError = false;
+  const queryLimit = layer.key === "dirock_ruf_n_60" ? 30 : 10;
 
   for (const term of layer.searchTerms) {
     const { data, error } = await supabase
       .from("nomenclature_1c")
       .select("code,name,brand")
       .ilike("name", buildSearchPattern(term))
-      .limit(10);
+      .limit(queryLimit);
 
     if (error) {
       hadSupabaseError = true;
