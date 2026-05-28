@@ -225,6 +225,35 @@ function detectParapetFunnelCount(text: string) {
 function detectRoofWoolLayers(lower: string): DetectedLayer[] {
   const result = new Map<string, DetectedLayer>();
 
+  const addTechnorufNamedLayer = (letter: string, grade: string, thickness: string) => {
+    const normalizedLetter = letter.toLowerCase() === "в" ? "В" : "Н";
+    const normalizedGrade = grade.toLowerCase();
+    const gradeLabel = normalizedGrade === "экстра"
+      ? "ЭКСТРА"
+      : normalizedGrade === "проф"
+        ? "ПРОФ"
+        : "ОПТИМА";
+    const thicknessMm = Number(thickness);
+    if (!Number.isFinite(thicknessMm)) return;
+
+    const key = `technoruf_${normalizedLetter.toLowerCase()}_${gradeLabel.toLowerCase()}_${thicknessMm}`;
+    result.set(key, {
+      key,
+      role: normalizedLetter === "В" ? "верхний слой теплоизоляции кровли" : "нижний слой теплоизоляции кровли",
+      label: `ТЕХНОРУФ ${normalizedLetter} ${gradeLabel} ${thicknessMm} мм`,
+      detected: true,
+      searchTerms: [
+        `ТЕХНОРУФ ${normalizedLetter} ${gradeLabel} ${thicknessMm}`,
+        `ТЕХНОРУФ ${normalizedLetter} ${gradeLabel}`,
+        `ТЕХНОРУФ ${gradeLabel} ${thicknessMm}`,
+      ],
+      factor: 1.03,
+      thicknessMm,
+      quantityType: "m3",
+      note: "Марка и толщина теплоизоляции взяты из таблицы состава кровли; перед КП сверить с ведомостью кровли.",
+    });
+  };
+
   const addTechnorufLayer = (letter: string, density: string, thickness: string) => {
     const normalizedLetter = letter.toLowerCase() === "в" ? "В" : "Н";
     const densityLabel = `${normalizedLetter}${density}`;
@@ -248,6 +277,16 @@ function detectRoofWoolLayers(lower: string): DetectedLayer[] {
       note: "Марку, плотность и толщину теплоизоляции сверить по ведомости кровли/КР перед КП.",
     });
   };
+
+  for (const match of lower.matchAll(/технор[уо]ф\s*([вн])\s*(экстра|проф|оптима)\s*(\d{2,3})(?:\s*мм)?/gi)) {
+    const index = match.index ?? 0;
+    const context = lower.slice(Math.max(0, index - 360), index + 360);
+    if (/кровл|logicroof|профлист|мембран|паробарьер|состав/i.test(context)) {
+      addTechnorufNamedLayer(match[1], match[2], match[3]);
+    }
+  }
+
+  if (result.size) return Array.from(result.values());
 
   for (const match of lower.matchAll(/технор[уо]ф\s*([вн])\s*(\d{2,3})\s*[-–—]?\s*(\d{2,3})\s*мм/gi)) {
     const index = match.index ?? 0;
@@ -290,6 +329,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const roofSpecAreas = extractRoofSpecAreas(lower);
   const pvcMembraneThicknessMatch = lower.match(/logicroof\s+v-rp[\s\S]{0,80}?(\d(?:[,.]\d)?)\s*мм/i)
+    ?? lower.match(/logicroof\s+v-rp[^\d]{0,40}(1[,.][258]|2[,.]0|2)/i)
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const roofWoolLayers = detectRoofWoolLayers(lower);
@@ -1040,6 +1080,9 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "technoruf_n_prof_100_spec" && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
   if (layer.key === "technoruf_n_prof_100_spec" && /н\s*(?:проф|30)|н30/i.test(item.name ?? "")) score += 10;
   if (layer.key.startsWith("technoruf_") && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
+  if (layer.key.includes("_экстра_") && /в\s*экстра/i.test(item.name ?? "")) score += 18;
+  if (layer.key.includes("_проф_") && /н\s*проф/i.test(item.name ?? "")) score += 18;
+  if (layer.key.includes("_оптима_") && /(?:в|н)\s*оптима/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
   if (layer.key === "hydrowind_membrane" && /гидро.?ветрозащит|ветрозащит/i.test(item.name ?? "")) score += 14;
