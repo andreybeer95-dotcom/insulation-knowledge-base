@@ -1756,7 +1756,7 @@ export async function GET(request: NextRequest) {
         supabase
           .from('nomenclature_1c')
           .select('id, code, article, name, brand')
-          .or('name.ilike.%WIRED MAT%,name.ilike.%Wired Mat%,name.ilike.%Вайред Мат%,name.ilike.%ВАЙРЕД МАТ%,name.ilike.%Rockwool%Мат%,name.ilike.%Роквул%Мат%,name.ilike.%прошивн%мат%')
+          .or('name.ilike.%WIRED MAT%,name.ilike.%Wired Mat%,name.ilike.%Вайред Мат%,name.ilike.%ВАЙРЕД МАТ%,name.ilike.%Вайеред Мат%,name.ilike.%Rockwool%Мат%,name.ilike.%Роквул%Мат%,name.ilike.%прошивн%мат%')
           .limit(180),
         supabase
           .from('nomenclature_1c')
@@ -1769,7 +1769,7 @@ export async function GET(request: NextRequest) {
       const isTechnicalMat = (item: NomenclatureItem) => {
         const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
         return (
-          /wired\s*mat|вайред\s*мат|прошивн.*мат|тех.*мат|мат.*техническ|rockwool.*мат|роквул.*мат|мат.*rockwool|мат.*роквул/i.test(text) &&
+          /wired\s*mat|вайред\s*мат|вайеред\s*мат|прошивн.*мат|тех.*мат|мат.*техническ|rockwool.*мат|роквул.*мат|мат.*rockwool|мат.*роквул/i.test(text) &&
           !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп|кф\s*1|кф1|ветош|ткань|полотно|хпп|мытья полов|холстопрошив/i.test(text)
         )
       }
@@ -1778,9 +1778,9 @@ export async function GET(request: NextRequest) {
           const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
           const thicknessRank = requestedMatThicknesses.findIndex((thickness) => hasBoardThickness(item.name, thickness))
           const normalizedThicknessRank = thicknessRank === -1 ? 50 : thicknessRank
-          if (/(rockwool|роквул)/i.test(text) && /wired\s*mat|вайред\s*мат/i.test(text)) return normalizedThicknessRank
+          if (/(rockwool|роквул)/i.test(text) && /wired\s*mat|вайред\s*мат|вайеред\s*мат/i.test(text)) return normalizedThicknessRank
           if (/(rockwool|роквул)/i.test(text)) return 20 + normalizedThicknessRank
-          if (/wired\s*mat|вайред\s*мат|прошивн.*мат/i.test(text)) return 40 + normalizedThicknessRank
+          if (/wired\s*mat|вайред\s*мат|вайеред\s*мат|прошивн.*мат/i.test(text)) return 40 + normalizedThicknessRank
           return 80 + normalizedThicknessRank
         }
         const scoreDiff = score(a) - score(b)
@@ -1800,7 +1800,10 @@ export async function GET(request: NextRequest) {
       const isRequestedRockwoolMat = (item: NomenclatureItem) => {
         const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
         return (
-          /(rockwool|роквул|вайред\s*мат|wired\s*mat)/i.test(text) &&
+          (
+            (/(rockwool|роквул)/i.test(text) && /wired\s*mat|вайред\s*мат|вайеред\s*мат/i.test(text)) ||
+            /(^|\s)wired\s*mat/i.test(text)
+          ) &&
           !/(isotec|изотек|xotpipe|хотпайп|cutwool|катвул|paroc|baztech|базтех)/i.test(text)
         )
       }
