@@ -1309,8 +1309,8 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
   if (layer.key === "dirock_ruf_n_60" && /dirock|технор[уо]ф\s+н\s+проф/i.test(item.name ?? "")) score += 16;
-  if (layer.key === "dirock_ruf_n_60" && /1200[хx*]600[хx*]60|[хx*]60\s*мм|\b60\s*мм/i.test(item.name ?? "")) score += 46;
-  if (layer.key === "dirock_ruf_n_60" && /[хx*](?:50|80|100|110|120|130|140|150|160|170)\s*мм|\b(?:50|80|100|110|120|130|140|150|160|170)\s*мм/i.test(item.name ?? "")) score -= 32;
+  if (layer.key === "dirock_ruf_n_60" && /1200[хx*]600[хx*]60\b|[хx*]60(?:\s*мм|\b)|\b60\s*мм/i.test(item.name ?? "")) score += 54;
+  if (layer.key === "dirock_ruf_n_60" && /[хx*](?:50|80|100|110|120|130|140|150|160|170)(?:\s*мм|\b)|\b(?:50|80|100|110|120|130|140|150|160|170)\s*мм/i.test(item.name ?? "")) score -= 42;
   if (layer.key === "dirock_ruf_n_60" && /клин|в\s*60|в60|оптима/i.test(item.name ?? "")) score -= 12;
   if (layer.key === "pirromembrane_70" && /pirromembrane|logicpir\s+prof/i.test(item.name ?? "")) score += 18;
   if (layer.key === "pirromembrane_70" && /70\s*мм|[хx*]70\b|х70\b/i.test(item.name ?? "")) score += 28;
