@@ -73,6 +73,7 @@ type DetectedLayer = {
   thicknessMm?: number;
   quantityType: "m2" | "m3" | "project";
   projectOnly?: boolean;
+  reviewOnly?: boolean;
   note?: string;
   unitCount?: number;
   areaOverride?: number;
@@ -165,6 +166,17 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
       note: roofSpecAreas.sandwichRoofArea > 0
         ? `Площадь мембранной кровли взята из спецификации кровельного покрытия. Отдельно найден тип кровли из сэндвич-панелей ${roofSpecAreas.sandwichRoofArea} м2; его считать отдельно по ведомости/номенклатуре.`
         : "Площадь мембранной кровли взята из спецификации кровельного покрытия.",
+    };
+  }
+
+  const plastfoilMainArea = detectPlastfoilLayers(text.toLowerCase())
+    .find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride;
+  if (plastfoilMainArea && plastfoilMainArea > 0) {
+    return {
+      value: round(plastfoilMainArea, 2),
+      source: "pdf_text",
+      confidence: "medium",
+      note: "Площадь основной ПВХ-мембраны Plastfoil Classic взята из спецификации элементов кровли. В проекте указано, что объем дан без учета раскладки и раскроя; для счета сверить с ведомостью кровли.",
     };
   }
 
@@ -462,6 +474,62 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     },
     ...plastfoilLayers,
     {
+      key: "dirock_ruf_n_60",
+      role: "нижний минераловатный слой утепления кровли",
+      label: "Dirock РУФ Н 115 кг/м3, 60 мм",
+      detected: includesAny(lower, [/dirock\s+руф\s+н[\s\S]{0,120}?60\s*мм/i]),
+      searchTerms: ["ТЕХНОРУФ Н ПРОФ 60", "ТЕХНОРУФ Н 60", "Dirock РУФ Н 60"],
+      factor: 1.03,
+      thicknessMm: 60,
+      areaOverride: mainPvcMembraneArea,
+      quantityType: "m3",
+      reviewOnly: true,
+      note: "В проекте указан Dirock РУФ Н 115 кг/м3 60 мм или аналог. Точную замену на ТЕХНОРУФ/другую минвату согласовать по системе К0 и пожарному сертификату.",
+    },
+    {
+      key: "pirromembrane_70",
+      role: "верхний PIR-слой утепления кровли",
+      label: "PirroMembrane 70 мм",
+      detected: includesAny(lower, [/pirromembrane[\s\S]{0,120}?70\s*мм/i, /pir-плит[а-я\s"«»]*pirromembrane[\s\S]{0,120}?70\s*мм/i]),
+      searchTerms: ["PirroMembrane 70", "LOGICPIR PROF Ф/Ф 70", "LOGICPIR PROF 70"],
+      factor: 1.03,
+      thicknessMm: 70,
+      areaOverride: mainPvcMembraneArea,
+      quantityType: "m3",
+      reviewOnly: true,
+      note: "В проекте указаны PIR-плиты PirroMembrane 70 мм или аналог в системе Комби PIR. Аналог LOGICPIR/PIR подбирать только после согласования системы и пожарного сертификата К0.",
+    },
+    {
+      key: "roof_fastener_telescopic_130",
+      role: "крепеж ПВХ-мембраны/утеплителя",
+      label: "Телескопический крепеж с саморезом Ø5,5х35 мм",
+      detected: includesAny(lower, [/телескопическ[а-я\s-]*креп[её]ж[\s\S]{0,80}?саморез[\s\S]{0,30}(?:5[,.]5|5,5|5\.5)\s*[xх*]\s*35/i, /телескопическ[а-я\s-]*шайб[а-я\s-]*на\s+саморез[еа][\s\S]{0,30}(?:5[,.]5|5,5|5\.5)\s*[xх*]\s*35/i]),
+      searchTerms: ["Телескопический крепеж TERMOCLIP 1 / 130 мм", "Телескопический крепеж TERMOCLIP 1 / 140 мм", "Саморез сверлоконечный 5,5х35"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "В проекте указан механический монтаж к профлисту. Количество крепежа считать по ветровому расчету и схеме крепления; длину телескопа/самореза сверить по толщине пирога 60+70 мм и основанию.",
+    },
+    {
+      key: "pvc_clamping_rail",
+      role: "узлы примыкания/прижимная рейка",
+      label: "Прижимная рейка",
+      detected: includesAny(lower, [/прижимн[а-я\s-]*рейк/i]),
+      searchTerms: ["Прижимная алюминиевая рейка"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "Прижимную рейку считать по длинам примыканий, парапетов и узлов; количество не выводить из общей площади кровли.",
+    },
+    {
+      key: "pvc_metal_flashing",
+      role: "доборные элементы ПВХ-кровли",
+      label: "ПВХ-металл / оцинкованный Г-образный лист 0,6 мм",
+      detected: includesAny(lower, [/лист\s+из\s+оцинкованн[а-я\s-]*стали\s+г-образн[\s\S]{0,30}0[,.]6/i, /пвх[\s-]*металл/i]),
+      searchTerms: ["ПВХ металл", "PLASTFOIL FERROPLAST"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "Доборные элементы считать по узлам и длинам примыканий; замену оцинкованного Г-профиля на ПВХ-металл согласовать по узлам.",
+    },
+    {
       key: "logicpir_prof_ff_40_double",
       role: "теплоизоляция по Ж/Б, LOGICPIR",
       label: "LOGICPIR PROF Ф/Ф 40 мм, 2 слоя",
@@ -542,6 +610,26 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       quantityType: "project",
       projectOnly: true,
       note: "Профлист Н57 считать по КМ/КМД или ведомости профлиста; по площади кровли автоматически в счет не ставить.",
+    },
+    {
+      key: "profiled_sheet_n114",
+      role: "несущее основание/профлист кровли",
+      label: "Профилированный лист Н114-750-1,0",
+      detected: includesAny(lower, [/профилированн[а-я\s-]*лист[\s\S]{0,60}н\s*114[\s\S]{0,40}750[\s\S]{0,20}1[,.]0/i, /н114-750-1[,.]0/i]),
+      searchTerms: [],
+      quantityType: "project",
+      projectOnly: true,
+      note: "Профлист Н114-750-1,0 указан как основание кровли; считать по разделу КМ/КМД и ведомости профлиста, не по общей площади мембраны.",
+    },
+    {
+      key: "profiled_sheet_c21",
+      role: "доборное основание/профлист узлов",
+      label: "Профилированный лист C21-1000-0,6",
+      detected: includesAny(lower, [/профилированн[а-я\s-]*лист[\s\S]{0,60}[сc]\s*21[\s\S]{0,40}1000[\s\S]{0,20}0[,.]6/i, /[сc]\s*21-1000-0[,.]6/i]),
+      searchTerms: [],
+      quantityType: "project",
+      projectOnly: true,
+      note: "Профлист C21-1000-0,6 найден в узле/разделе КМ; количество брать из КМ/раскладки, не из площади кровли.",
     },
     {
       key: "roof_sandwich_panel_100",
@@ -1220,6 +1308,16 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("_оптима_") && /(?:в|н)\s*оптима/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
+  if (layer.key === "dirock_ruf_n_60" && /dirock|технор[уо]ф\s+н\s+проф/i.test(item.name ?? "")) score += 16;
+  if (layer.key === "dirock_ruf_n_60" && /1200[хx*]600[хx*]60|60\s*мм/i.test(item.name ?? "")) score += 28;
+  if (layer.key === "dirock_ruf_n_60" && /клин|в\s*60|в60|оптима/i.test(item.name ?? "")) score -= 12;
+  if (layer.key === "pirromembrane_70" && /pirromembrane|logicpir\s+prof/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "pirromembrane_70" && /70\s*мм|[хx*]70\b|х70\b/i.test(item.name ?? "")) score += 28;
+  if (layer.key === "pirromembrane_70" && /баня|interior|slope|30\b|40\b|50\b|80\b|100\b/i.test(item.name ?? "")) score -= 8;
+  if (layer.key === "roof_fastener_telescopic_130" && /termoclip|телескоп/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "roof_fastener_telescopic_130" && /130\s*мм|140\s*мм|5[,.]5[хx*]35/i.test(item.name ?? "")) score += 12;
+  if (layer.key === "pvc_clamping_rail" && /прижимн[а-я\s-]*рейк/i.test(item.name ?? "")) score += 24;
+  if (layer.key === "pvc_metal_flashing" && /пвх.?металл|ferroplast/i.test(item.name ?? "")) score += 20;
   if (layer.key === "hydrowind_membrane" && /гидро.?ветрозащит|ветрозащит/i.test(item.name ?? "")) score += 14;
   if (layer.key === "keramzit_slope" && /20-40|20\/40/i.test(item.name ?? "")) score += 4;
   if (layer.key.startsWith("roof_funnel") && /воронк/i.test(item.name ?? "")) score += 18;
@@ -1643,7 +1741,7 @@ export async function POST(request: NextRequest) {
       const requiresProjectQuantity = layer.key.startsWith("roof_funnel") && !layer.unitCount;
       const requiresMeasuredQuantity = layer.quantityType !== "project" && quantity.value === null;
 
-      if (primary?.code && !requiresProjectQuantity && !requiresMeasuredQuantity) {
+      if (primary?.code && !layer.reviewOnly && !requiresProjectQuantity && !requiresMeasuredQuantity) {
         invoiceItems.push({
           role: layer.role,
           material: primary.name,
@@ -1659,13 +1757,15 @@ export async function POST(request: NextRequest) {
           })),
         });
       } else {
-        const missingReason = requiresProjectQuantity
-          ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
-          : requiresMeasuredQuantity
-            ? "Код 1С найден, но количество не рассчитано; в счет без площади/ведомости не ставить."
-            : !layer.searchTerms.length && layer.note
-              ? layer.note
-              : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.";
+        const missingReason = layer.reviewOnly
+          ? layer.note ?? "Позиция найдена как возможный вариант, но требует согласования перед включением в КП."
+          : requiresProjectQuantity
+            ? "Код 1С найден, но количество воронок не распознано; в счет без проекта водоотвода или калькулятора NAV.TN не ставить."
+            : requiresMeasuredQuantity
+              ? "Код 1С найден, но количество не рассчитано; в счет без площади/ведомости не ставить."
+              : !layer.searchTerms.length && layer.note
+                ? layer.note
+                : "Код 1С не найден автоматически; в счет без ручной проверки не ставить.";
 
         notFound.push({
           role: layer.role,
