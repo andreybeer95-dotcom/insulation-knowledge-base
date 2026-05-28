@@ -1797,15 +1797,27 @@ export async function GET(request: NextRequest) {
             !/\d{2,3}\s*(?:мм|mm)?/i.test(item.name || '')
           )
       )
-      const wiredIds = new Set(wiredItems.map((item) => item.id))
+      const isRequestedRockwoolMat = (item: NomenclatureItem) => {
+        const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+        return (
+          /(rockwool|роквул|вайред\s*мат|wired\s*mat)/i.test(text) &&
+          !/(isotec|изотек|xotpipe|хотпайп|cutwool|катвул|paroc|baztech|базтех)/i.test(text)
+        )
+      }
+      const primaryWiredItems = wiredItems.filter(isRequestedRockwoolMat)
+      const secondaryWiredItems = wiredItems.filter((item) => !isRequestedRockwoolMat(item))
+      const wiredIds = new Set(primaryWiredItems.map((item) => item.id))
       const matAnalogItems = sortTechnicalMat(
-        ((technicalMatRes.data ?? []) as NomenclatureItem[])
+        [
+          ...secondaryWiredItems,
+          ...((technicalMatRes.data ?? []) as NomenclatureItem[]),
+        ]
           .filter(isTechnicalMat)
           .filter((item) => !wiredIds.has(item.id))
       )
 
       relevant_nomenclature = dedupeNomenclature([
-        ...wiredItems,
+        ...(primaryWiredItems.length > 0 ? primaryWiredItems : wiredItems),
         ...relevant_nomenclature.filter(isTechnicalMat),
       ]).slice(0, 20)
       nomenclature_analogs = dedupeNomenclature([
