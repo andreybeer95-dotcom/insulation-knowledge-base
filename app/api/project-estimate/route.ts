@@ -664,6 +664,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         "Воронка кровельная PLASTFOIL VORTEX D=160",
         "Воронка кровельная WIGAR PRO 110",
         "Воронка кровельная WIGAR DN 110",
+        "Воронка кровельная TERMOCLIP",
         "TERMOCLIP ВФО",
       ],
       quantityType: "project",
@@ -1226,7 +1227,8 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key === "roof_funnel_geberit_pluvia" && /12\s*л\/?\s*сек|12\s*л/i.test(item.name ?? "")) score += 8;
   if (layer.key === "roof_funnel_geberit_pluvia" && /фланц|фартук/i.test(item.name ?? "")) score += 5;
   if (layer.key === "roof_funnel_geberit_pluvia" && /парапет|ремонт/i.test(item.name ?? "")) score -= 14;
-  if (layer.key === "roof_funnel_geberit_pluvia" && /технониколь|plastfoil|wigar|termoclip/i.test(item.name ?? "")) score += 3;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /технониколь|plastfoil|wigar/i.test(item.name ?? "")) score += 3;
+  if (layer.key === "roof_funnel_geberit_pluvia" && /termoclip/i.test(item.name ?? "")) score += 9;
   if (layer.key === "roof_funnel_parapet" && /парапет/i.test(item.name ?? "")) score += 16;
   if (layer.key === "roof_funnel_parapet" && /квадрат/i.test(item.name ?? "")) score += 4;
   if (layer.key === "roof_funnel" && /обжимн|прижимн|вб эко|стандарт/i.test(item.name ?? "")) score += 6;
@@ -1264,7 +1266,7 @@ async function findNomenclature(layer: DetectedLayer) {
     }
   }
 
-  const resultLimit = layer.key === "roof_funnel_geberit_pluvia" ? 12 : 3;
+  const resultLimit = layer.key === "roof_funnel_geberit_pluvia" ? 16 : 3;
   const supabaseResult = Array.from(found.values())
     .sort((a, b) => itemScore(b, layer) - itemScore(a, layer))
     .slice(0, resultLimit);
@@ -1299,7 +1301,7 @@ async function findLocalNomenclature(layer: DetectedLayer) {
       return terms.some((parts) => parts.every((part) => name.includes(part)));
     })
     .sort((a, b) => itemScore(b, layer) - itemScore(a, layer))
-    .slice(0, layer.key === "roof_funnel_geberit_pluvia" ? 12 : 3);
+    .slice(0, layer.key === "roof_funnel_geberit_pluvia" ? 16 : 3);
 }
 
 function parseRollArea(name: string | null) {
@@ -1503,7 +1505,7 @@ function buildQuoteDraft(summary: {
   if (funnelAlternativeLines.length) {
     lines.push("");
     lines.push("Воронки/аналоги на согласование:");
-    lines.push(...funnelAlternativeLines.slice(0, 12));
+    lines.push(...funnelAlternativeLines.slice(0, 14));
     lines.push("Основную воронку из проекта не заменять автоматически; подобрать аналог только после согласования типа, диаметра/размера, обогрева и схемы водоотвода.");
   }
 
