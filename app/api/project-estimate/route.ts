@@ -660,7 +660,10 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         "Воронка ТехноНИКОЛЬ ВБ ЭКО",
         "Воронка ТехноНИКОЛЬ ЭКО с обжимным фланцем",
         "Воронка кровельная PLASTFOIL VORTEX",
+        "Воронка кровельная PLASTFOIL VORTEX D=110",
+        "Воронка кровельная PLASTFOIL VORTEX D=160",
         "Воронка кровельная WIGAR PRO 110",
+        "Воронка кровельная WIGAR DN 110",
         "TERMOCLIP ВФО",
       ],
       quantityType: "project",
@@ -1500,7 +1503,7 @@ function buildQuoteDraft(summary: {
   if (funnelAlternativeLines.length) {
     lines.push("");
     lines.push("Воронки/аналоги на согласование:");
-    lines.push(...funnelAlternativeLines.slice(0, 8));
+    lines.push(...funnelAlternativeLines.slice(0, 12));
     lines.push("Основную воронку из проекта не заменять автоматически; подобрать аналог только после согласования типа, диаметра/размера, обогрева и схемы водоотвода.");
   }
 
