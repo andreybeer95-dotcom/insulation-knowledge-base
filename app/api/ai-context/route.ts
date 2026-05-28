@@ -342,7 +342,7 @@ export async function GET(request: NextRequest) {
   const queryNumbers = (rawQuery.match(/\d+/g) || []).filter((n) => n.length >= 2)
   const requestedSizeNumbers = extractExplicitSizeNumbers(rawQuery) ?? queryNumbers
   const hasCylinderQueryForNomenclature =
-    /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп|\bкф1\b|\bкф\b|\brwl\b|кв[-\s]*\d/i.test(rawQuery)
+    /цилиндр|цилиндры|скорлуп|xotpipe|хотпайп|кф\s*1|кф1|rwl|кв[-\s]*\d/i.test(rawQuery)
   const hasRoofProjectQueryForNomenclature =
     /кровл|крыша|скат|плоск|металлочерепиц|гибк[а-яё]*\s+черепиц|битумн[а-яё]*\s+черепиц|пвх.*мембран|мембран.*пвх|logicroof|shinglas|шинглас/i.test(rawQuery)
   const hasPitchedRoofCoveringChoiceQuery =
