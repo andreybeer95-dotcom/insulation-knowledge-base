@@ -227,7 +227,7 @@ export async function GET(request: NextRequest) {
   const brandNameMap: Record<string, string> = {
     '1b4a5543-7101-46cd-9a85-9866dd1132a9': 'XOTPIPE',
     '4deb56f0-b7c9-46e9-8279-9fc4397419dd': 'ЭКОРОЛЛ',
-    '80a19db2-d3ea-4b84-84b5-3369e7633a6e': 'Ceresit',
+    '80a19db2-d3ea-4b84-84b5-3369e7633a6e': 'ЦЕРЕЗИТ',
     'c0f1731c-12a2-4d6a-bca3-6020711de7f5': 'BASWOOL',
     '6f22e435-08cc-46ab-ba45-d119ce497581': 'ROCKWOOL',
     'f5fc0110-8057-47fd-9811-9aa1a2e81d8b': 'ТЕХНОНИКОЛЬ',
@@ -377,6 +377,8 @@ export async function GET(request: NextRequest) {
     /профилированн\w*\s+мембран|planter|плантер|grunter|грунтер/i.test(rawQuery)
   const hasFacadeFastenerQueryForNomenclature =
     /болгирус|bolgarys|фасадн\w*\s+(?:дюб|креп)|дюбел\w*\s+фасад|креп[её]ж\w*\s+фасад/i.test(rawQuery)
+  const hasCeresitCt85DirectQuery =
+    /(?:ceresit|церезит)[\s\S]{0,30}(?:ct|ст)\s*85|(?:ct|ст)\s*85[\s\S]{0,30}(?:ceresit|церезит)/i.test(rawQuery)
   const hasPipelinePvcSystemQuery =
     /тн[-\s]*техизол.*труб(?:опровод)?.*пвх|труб(?:опровод)?.*пвх|пвх.*труб(?:опровод)?|pipeline.*pvc|pvc.*pipeline|покровн.*слой.*пвх|logicroof.*труб(?:опровод)?|труб(?:опровод)?.*logicroof|ecoplast.*труб(?:опровод)?|труб(?:опровод)?.*ecoplast|мат.*техно.*пвх/i.test(rawQuery)
   const hasPvcAccessoryOnlyQuery =
@@ -1679,6 +1681,51 @@ export async function GET(request: NextRequest) {
       ]).slice(0, 20)
       nomenclature_analogs = dedupeNomenclature([
         ...fastenerItems.filter((item) => !primaryIds.has(item.id)),
+        ...nomenclature_analogs,
+      ]).slice(0, 30)
+    }
+
+    if (hasCeresitCt85DirectQuery) {
+      const [ct85ByCodeRes, facadeMixRes, ceresitRelatedRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .in('code', ['ЦБ16193', 'ЦБ08178', 'ВН05559'])
+          .limit(20),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%штукатурно-клеев%,name.ilike.%штукатурно клеев%,name.ilike.%Клей для плит из пенополист%,name.ilike.%для пенополистирола%,name.ilike.%для теплоизоляции%,name.ilike.%Клеевой и базовый штукатурный%,name.ilike.%Каверпликс%')
+          .limit(240),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .eq('brand', 'ЦЕРЕЗИТ')
+          .or('name.ilike.%CT 83%,name.ilike.%CT 180%,name.ilike.%CT 190%,name.ilike.%СТ 83%,name.ilike.%СТ 180%,name.ilike.%СТ 190%')
+          .limit(80),
+      ])
+
+      const isFacadeInsulationAdhesive = (item: NomenclatureItem) => {
+        const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+        return (
+          /ct\s*(?:83|85|180|190)|ст\s*(?:83|85|180|190)|штукатурно[\s-]*клеев|клей.*пенополист|для плит.*пенополист|для теплоизоляции|клеевой.*базовый.*штукатур|каверпликс|севенер|isofix|duocontact|procontact/i.test(text) &&
+          !/монтажн\w*\s+клей|клей-?пена|пена|шланг|плинтус|сэндвич|гипсов|наливн|затирк|краска|герметик|грунт/i.test(text)
+        )
+      }
+      const ct85Items = dedupeNomenclature(((ct85ByCodeRes.data ?? []) as NomenclatureItem[])
+        .filter((item) => /(?:ceresit|церезит).*ct\s*85|(?:ceresit|церезит).*ст\s*85|ct\s*85|ст\s*85/i.test(item.name || '')))
+      const candidateMixes = dedupeNomenclature([
+        ...((ceresitRelatedRes.data ?? []) as NomenclatureItem[]),
+        ...((facadeMixRes.data ?? []) as NomenclatureItem[]),
+      ]).filter(isFacadeInsulationAdhesive)
+      const ct85Ids = new Set(ct85Items.map((item) => item.id))
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...ct85Items,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_analogs = dedupeNomenclature([
+        ...candidateMixes.filter((item) => !ct85Ids.has(item.id)),
         ...nomenclature_analogs,
       ]).slice(0, 30)
     }
