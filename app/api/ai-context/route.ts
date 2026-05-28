@@ -2030,29 +2030,51 @@ export async function GET(request: NextRequest) {
     }
 
     if (hasRoofFunnelQueryForNomenclature) {
-      const { data: funnelData } = await supabase
-        .from('nomenclature_1c')
-        .select('id, code, article, name, brand')
-        .or([
-          'name.ilike.%Geberit Pluvia%',
-          'name.ilike.%Геберит%',
-          'name.ilike.%Pluvia%',
-          'name.ilike.%воронк%',
-          'name.ilike.%PLASTFOIL VORTEX%',
-          'name.ilike.%WIGAR%',
-          'name.ilike.%TERMOCLIP ВФО%',
-          'name.ilike.%ТехноНИКОЛЬ%Воронк%',
-        ].join(','))
-        .limit(350)
+      const wantsGeberitPluviaFunnel = /geberit|pluvia|геберит|плювиа/i.test(rawQuery)
+
+      const [funnelByCodeRes, funnelExactRes, funnelBroadRes] = await Promise.all([
+        wantsGeberitPluviaFunnel
+          ? supabase
+              .from('nomenclature_1c')
+              .select('id, code, article, name, brand')
+              .in('code', ['\u0412\u041d01233', '\u0426\u041115701'])
+              .limit(20)
+          : Promise.resolve({ data: [] }),
+        wantsGeberitPluviaFunnel
+          ? supabase
+              .from('nomenclature_1c')
+              .select('id, code, article, name, brand')
+              .or('name.ilike.%Geberit Pluvia%,name.ilike.%Геберит%,name.ilike.%Pluvia%')
+              .limit(80)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or([
+            'name.ilike.%Geberit Pluvia%',
+            'name.ilike.%Геберит%',
+            'name.ilike.%Pluvia%',
+            'name.ilike.%воронк%',
+            'name.ilike.%PLASTFOIL VORTEX%',
+            'name.ilike.%WIGAR%',
+            'name.ilike.%TERMOCLIP ВФО%',
+            'name.ilike.%ТехноНИКОЛЬ%Воронк%',
+          ].join(','))
+          .limit(350),
+      ])
 
       const funnelItems = sortRoofFunnelNomenclature(
-        dedupeNomenclature((funnelData ?? []) as NomenclatureItem[])
+        dedupeNomenclature([
+          ...((funnelByCodeRes.data ?? []) as NomenclatureItem[]),
+          ...((funnelExactRes.data ?? []) as NomenclatureItem[]),
+          ...((funnelBroadRes.data ?? []) as NomenclatureItem[]),
+        ])
           .filter((item) => isRoofFunnelNomenclature(item.name))
       )
 
       const requestedFunnelItems = funnelItems.filter((item) => {
         const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
-        if (/geberit|pluvia|геберит|плювиа/i.test(rawQuery)) return /geberit|pluvia|геберит|плювиа/.test(text)
+        if (wantsGeberitPluviaFunnel) return /geberit|pluvia|геберит|плювиа/.test(text)
         if (/plastfoil|vortex/i.test(rawQuery)) return /plastfoil|vortex/.test(text)
         if (/wigar/i.test(rawQuery)) return /wigar/.test(text)
         if (/termoclip|термоклип|вфо/i.test(rawQuery)) return /termoclip|термоклип|вфо/.test(text)
