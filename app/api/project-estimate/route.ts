@@ -96,6 +96,10 @@ function toNumber(value: string) {
   return Number(value.replace(",", "."));
 }
 
+function toLooseNumber(value: string) {
+  return Number(value.replace(/\s+/g, "").replace(",", "."));
+}
+
 function round(value: number, digits = 2) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
@@ -222,6 +226,92 @@ function detectParapetFunnelCount(text: string) {
   return total > 0 ? total : undefined;
 }
 
+function findNearestAreaM2Match(text: string, index: number) {
+  const start = Math.max(0, index - 900);
+  const window = text.slice(start, index + 900);
+  const matches = Array.from(window.matchAll(/(\d{1,3}(?:\s+\d{3})+|\d+(?:[,.]\d+)?)\s*\*?\s*(?:м\s*2|м2|м²)/gi))
+    .map((match) => {
+      const value = match[1] ? toLooseNumber(match[1]) : NaN;
+      return {
+        value,
+        distance: Math.abs(start + (match.index ?? 0) - index),
+      };
+    })
+    .filter((match) => Number.isFinite(match.value) && match.value > 10)
+    .sort((a, b) => a.distance - b.distance);
+
+  return matches[0];
+}
+
+function findPlastfoilMaterialMatch(text: string, pattern: RegExp) {
+  const re = new RegExp(pattern.source, pattern.flags.includes("i") ? "gi" : "g");
+  let fallbackIndex = -1;
+  let best: { index: number; area?: number; distance?: number } | null = null;
+
+  for (const match of text.matchAll(re)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    if (fallbackIndex < 0) fallbackIndex = index;
+
+    const areaMatch = findNearestAreaM2Match(text, index);
+    if (!areaMatch) continue;
+    if (!best || (areaMatch.distance ?? Number.MAX_SAFE_INTEGER) < (best.distance ?? Number.MAX_SAFE_INTEGER)) {
+      best = { index, area: areaMatch.value, distance: areaMatch.distance };
+    }
+  }
+
+  return best ?? (fallbackIndex >= 0 ? { index: fallbackIndex } : null);
+}
+
+function detectPlastfoilLayers(lower: string): DetectedLayer[] {
+  const layers: DetectedLayer[] = [];
+  const classicMatch = findPlastfoilMaterialMatch(lower, /plastfoil\s+classic|пластфойл[\s\S]{0,30}classic/i);
+  const artMatch = findPlastfoilMaterialMatch(lower, /plastfoil\s+art|пластфойл[\s\S]{0,30}art/i);
+
+  if (classicMatch) {
+    const area = classicMatch.area;
+    layers.push({
+      key: "pvc_plastfoil_classic",
+      role: "кровельная ПВХ-мембрана",
+      label: "Plastfoil Classic 1,2 мм",
+      detected: true,
+      searchTerms: ["PLASTFOIL classic", "ПЛАСТФОЙЛ classic", "Plastfoil Classic", "ПЛАСТФОЙЛ"],
+      factor: 1.15,
+      thicknessMm: 1.2,
+      areaOverride: area,
+      quantityType: "m2",
+      note: area
+        ? "Площадь Plastfoil Classic взята из спецификации элементов кровли. В примечании проекта указано, что объем дан без учета раскладки и раскроя; расчет рулонов сделан с коэффициентом 1,15."
+        : "В проекте указана Plastfoil Classic 1,2 мм, но площадь в строке спецификации не распознана.",
+    });
+  }
+
+  if (artMatch) {
+    const area = artMatch.area;
+    layers.push({
+      key: "pvc_plastfoil_art",
+      role: "дополнительная неармированная ПВХ-мембрана для примыканий",
+      label: "Plastfoil Art 1,5 мм",
+      detected: true,
+      searchTerms: ["PLASTFOIL ART 1,5", "ПЛАСТФОЙЛ ART 1,5", "Plastfoil Art", "ПЛАСТФОЙЛ"],
+      factor: 1.15,
+      thicknessMm: 1.5,
+      areaOverride: area,
+      quantityType: "m2",
+      note: area
+        ? "Площадь Plastfoil Art взята из спецификации/узлов как дополнительная неармированная ПВХ-мембрана. В примечании проекта указано, что объем дан без учета раскладки и раскроя; расчет рулонов сделан с коэффициентом 1,15."
+        : "В проекте указана Plastfoil Art 1,5 мм, но площадь в строке спецификации не распознана.",
+    });
+  }
+
+  return layers;
+}
+
+function detectGeberitPluviaCount(text: string) {
+  const directMatch = text.match(/(?:водосточн[а-я\s-]*воронк[а-я\s"«»]*)?geberit\s+pluvia["»]?\s+(\d{1,4})/i);
+  return directMatch?.[1] ? Number(directMatch[1]) : undefined;
+}
+
 function detectRoofWoolLayers(lower: string): DetectedLayer[] {
   const result = new Map<string, DetectedLayer>();
 
@@ -293,13 +383,19 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const roofWoolLayers = detectRoofWoolLayers(lower);
+  const plastfoilLayers = detectPlastfoilLayers(lower);
+  const mainPvcMembraneArea = plastfoilLayers.find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride
+    ?? (roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined);
+  const hasParobarrierCa500 = /паробарьер\s*[сc][аa]\s*500|[сc][аa]\s*500/i.test(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
     /наружн[а-я\s-]*организованн[а-я\s-]*водосток/i,
     /водосточн[а-я\s-]*желоб/i,
     /водосборн[а-я\s-]*воронк/i,
   ]);
+  const hasGeberitPluvia = /geberit\s+pluvia|геберит\s+плювиа/i.test(lower);
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
   const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
+  const geberitPluviaUnitCount = hasGeberitPluvia ? detectGeberitPluviaCount(lower) : undefined;
   const funnelUnitCount = hasParapetFunnel ? detectParapetFunnelCount(lower) ?? detectUnitCount(lower, /воронк[а-я]*/) : detectUnitCount(lower, /воронк[а-я]*/);
 
   const keramzitSlope = lower.match(/керамзит[а-я\s-]*грав[а-я\s-]*?(\d{2,3})\s*(?:\.{2,3}|-)\s*(\d{2,3})\s*мм/i);
@@ -324,6 +420,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         ? "Марку и толщину мембраны сверить по проекту перед КП."
         : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
     },
+    ...plastfoilLayers,
     {
       key: "logicpir_prof_ff_40_double",
       role: "теплоизоляция по Ж/Б, LOGICPIR",
@@ -374,13 +471,17 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     {
       key: "technobarrier",
       role: "пароизоляция",
-      label: "ТЕХНОБАРЬЕР / Паробарьер C",
-      detected: includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i]),
-      searchTerms: ["ТЕХНОБАРЬЕР", "Паробарьер C", "Паробарьер"],
+      label: hasParobarrierCa500 ? "Паробарьер СА500" : "ТЕХНОБАРЬЕР / Паробарьер C",
+      detected: includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i, /паробарьер\s*[сc][аa]\s*500/i]),
+      searchTerms: hasParobarrierCa500
+        ? ["Паробарьер СА 500", "Паробарьер СА500", "Паробарьер"]
+        : ["ТЕХНОБАРЬЕР", "Паробарьер C", "Паробарьер"],
       factor: 1.12,
-      areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
+      areaOverride: mainPvcMembraneArea,
       quantityType: "m2",
-      note: "Марку пароизоляции сверить: в разных местах проекта указаны ТЕХНОБАРЬЕР и Паробарьер C.",
+      note: hasParobarrierCa500
+        ? "В проекте найден Паробарьер СА500; количество посчитано по основной площади ПВХ-мембраны, перед КП сверить по узлам и нахлестам."
+        : "Марку пароизоляции сверить: в разных местах проекта указаны ТЕХНОБАРЬЕР и Паробарьер C.",
     },
     {
       key: "hydrowind_membrane",
@@ -509,10 +610,20 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       note: "В проекте указан наружный организованный водосток; спецификацию желобов, водосборных воронок, труб и крепежа запросить у производителя/проектировщика. В счет без ведомости не ставить.",
     },
     {
+      key: "roof_funnel_geberit_pluvia",
+      role: "водоотвод/кровельная воронка",
+      label: "Водосточная воронка Geberit Pluvia",
+      detected: hasGeberitPluvia,
+      searchTerms: ["Geberit Pluvia", "Воронка Geberit Pluvia"],
+      quantityType: "project",
+      unitCount: geberitPluviaUnitCount,
+      note: "В проекте указана воронка Geberit Pluvia; не заменять автоматически на ТЕХНОНИКОЛЬ без согласования аналога.",
+    },
+    {
       key: hasParapetFunnel ? "roof_funnel_parapet" : "roof_funnel",
       role: "водоотвод/кровельная воронка",
       label: hasSquareParapetFunnel ? "Воронка парапетная квадратного сечения с галтелью 100х100х600" : hasParapetFunnel ? "Воронка парапетная" : "Воронка кровельная",
-      detected: (!hasExternalRoofDrainage || hasParapetFunnel) && includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
+      detected: !hasGeberitPluvia && (!hasExternalRoofDrainage || hasParapetFunnel) && includesAny(lower, [/воронк[а-я]*/i, /водосточн[а-я\s-]*воронк/i, /внутренн[а-я\s-]*водост/i]),
       searchTerms: hasParapetFunnel
         ? hasSquareParapetFunnel
           ? ["Воронка парапетная ТехноНИКОЛЬ квадратного сечения с галтелью 100*100*600", "Воронка парапетная ТехноНИКОЛЬ", "Воронка парапетная"]
@@ -1030,6 +1141,16 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   }
   if (layer.key === "pvc_logicroof_vrp" && /arctic|arctiс/i.test(item.name ?? "") && !/arctic|arctiс/i.test(requested)) score -= 20;
   if (layer.key === "pvc_logicroof_vrp" && /2[,.]10\s*[xх]\s*20/i.test(item.name ?? "")) score += 4;
+  if (layer.key === "pvc_plastfoil_classic" && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "pvc_plastfoil_classic" && /classic|classi[сc]/i.test(item.name ?? "")) score += 16;
+  if (layer.key === "pvc_plastfoil_classic" && /1[,.]2/i.test(item.name ?? "")) score += 24;
+  if (layer.key === "pvc_plastfoil_classic" && /eco|geo|polar|light|art|lay/i.test(item.name ?? "")) score -= 12;
+  if (layer.key === "pvc_plastfoil_art" && /plastfoil|пластфойл/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "pvc_plastfoil_art" && /\bart\b|®\s*art/i.test(item.name ?? "")) score += 22;
+  if (layer.key === "pvc_plastfoil_art" && /неармирован/i.test(item.name ?? "")) score += 8;
+  if (layer.key === "pvc_plastfoil_art" && /1[,.]5/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "pvc_plastfoil_art" && /40\s*м2|2000\s*[xх*]\s*20000/i.test(item.name ?? "")) score += 5;
+  if (layer.key === "pvc_plastfoil_art" && /classic|eco|geo|polar|light|lay/i.test(item.name ?? "")) score -= 12;
   if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
   if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
   if (layer.key.startsWith("logicpir_prof") && /logicpir/i.test(item.name ?? "") && /prof/i.test(item.name ?? "")) score += 16;
@@ -1037,6 +1158,8 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("_40") && /40\b|40\s*мм/i.test(item.name ?? "")) score += 10;
   if (layer.key.includes("_70") && /70\b|70\s*мм/i.test(item.name ?? "")) score += 10;
   if (layer.key === "technobarrier" && /технобарьер|паробарьер/i.test(item.name ?? "")) score += 14;
+  if (layer.key === "technobarrier" && /[сc][аa]\s*500/i.test(requested) && /[сc][аa]\s*500/i.test(name)) score += 20;
+  if (layer.key === "technobarrier" && /[сc][аa]\s*500/i.test(requested) && /технобарьер/i.test(name)) score -= 10;
   if (layer.key === "technoruf_n_prof_100_spec" && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
   if (layer.key === "technoruf_n_prof_100_spec" && /н\s*(?:проф|30)|н30/i.test(item.name ?? "")) score += 10;
   if (layer.key.startsWith("technoruf_") && /технор[уо]ф/i.test(item.name ?? "")) score += 14;
