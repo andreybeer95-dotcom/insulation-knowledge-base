@@ -355,12 +355,16 @@ export async function GET(request: NextRequest) {
     ...meaningfulKeywords,
     ...(shouldIgnoreNumericNomenclatureForRoofProject ? [] : requestedSizeNumbers),
   ]
-  const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг/i.test(rawQuery)
+  const hasVentFacadeQueryForNomenclature = /вент\s*фасад|вентфасад|нфс|навесн\w*\s+фасад|сайдинг|венти\s*батт|venti\s*batts|фасад\s*батт/i.test(rawQuery)
   const hasMultiStoreyFacadeQueryForNomenclature =
     hasVentFacadeQueryForNomenclature &&
     /(поликлиник|обществен|этажност\D*(?:[3-9]|\d{2,})|(?:[3-9]|\d{2,})\s*[- ]?этаж)/i.test(rawQuery)
   const hasRoofWoolQueryForNomenclature =
-    /техноруф|(?:^|\s)руф\s*[нв]?\b|кровельн\w*\s+утепл|утеплител\w*\s+кровл/i.test(rawQuery)
+    /техноруф|(?:^|\s)руф\s*[нв]?(?![а-яё])|кровельн\w*\s+утепл|утеплител\w*\s+кровл/i.test(rawQuery)
+  const baswoolRoofMatches = Array.from(rawQuery.matchAll(/руф\s+([нв])\s*(\d{2,3})/gi))
+  const baswoolRoofGradeNumbers = baswoolRoofMatches.map((match) => match[2])
+  const hasRockwoolWiredMatDirectQuery =
+    /rockwool|роквул/i.test(rawQuery) && /wired\s*mat|вайред|прошивн/i.test(rawQuery)
   const hasConstructionInsulationQueryForNomenclature =
     !hasCylinderQueryForNomenclature &&
     (
@@ -1747,6 +1751,70 @@ export async function GET(request: NextRequest) {
       ]).slice(0, 30)
     }
 
+    if (hasRockwoolWiredMatDirectQuery) {
+      const [wiredMatRes, technicalMatRes] = await Promise.all([
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .eq('brand', 'ROCKWOOL')
+          .or('name.ilike.%WIRED MAT%,name.ilike.%Wired Mat%,name.ilike.%WIRED%,name.ilike.%Вайред%,name.ilike.%прошивн%')
+          .limit(120),
+        supabase
+          .from('nomenclature_1c')
+          .select('id, code, article, name, brand')
+          .or('name.ilike.%прошивн%мат%,name.ilike.%тех%мат%,name.ilike.%мат%техническ%,name.ilike.%WIRED MAT%')
+          .limit(160),
+      ])
+
+      const requestedMatThicknesses = constructionThicknesses.length > 0 ? constructionThicknesses : ['50', '80', '100']
+      const isTechnicalMat = (item: NomenclatureItem) => {
+        const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+        return (
+          /wired\s*mat|прошивн.*мат|тех.*мат|мат.*техническ/i.test(text) &&
+          !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп/i.test(text)
+        )
+      }
+      const sortTechnicalMat = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
+        const score = (item: NomenclatureItem) => {
+          const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
+          const thicknessRank = requestedMatThicknesses.findIndex((thickness) => hasBoardThickness(item.name, thickness))
+          const normalizedThicknessRank = thicknessRank === -1 ? 50 : thicknessRank
+          if (/rockwool/i.test(text) && /wired\s*mat/i.test(text)) return normalizedThicknessRank
+          if (/rockwool/i.test(text)) return 20 + normalizedThicknessRank
+          if (/wired\s*mat|прошивн.*мат/i.test(text)) return 40 + normalizedThicknessRank
+          return 80 + normalizedThicknessRank
+        }
+        const scoreDiff = score(a) - score(b)
+        if (scoreDiff !== 0) return scoreDiff
+        return (b.revenue_3y ?? 0) - (a.revenue_3y ?? 0)
+      })
+
+      const wiredItems = sortTechnicalMat(
+        ((wiredMatRes.data ?? []) as NomenclatureItem[])
+          .filter(isTechnicalMat)
+          .filter((item) =>
+            requestedMatThicknesses.length === 0 ||
+            requestedMatThicknesses.some((thickness) => hasBoardThickness(item.name, thickness)) ||
+            !/\d{2,3}\s*(?:мм|mm)?/i.test(item.name || '')
+          )
+      )
+      const wiredIds = new Set(wiredItems.map((item) => item.id))
+      const matAnalogItems = sortTechnicalMat(
+        ((technicalMatRes.data ?? []) as NomenclatureItem[])
+          .filter(isTechnicalMat)
+          .filter((item) => !wiredIds.has(item.id))
+      )
+
+      relevant_nomenclature = dedupeNomenclature([
+        ...wiredItems,
+        ...relevant_nomenclature,
+      ]).slice(0, 20)
+      nomenclature_analogs = dedupeNomenclature([
+        ...matAnalogItems,
+        ...nomenclature_analogs,
+      ]).slice(0, 30)
+    }
+
     if (hasPvcAccessoryOnlyQuery) {
       const [bondByCodeRes, bondRes, mastRes, pvcMetalRes] = await Promise.all([
         supabase
@@ -2089,11 +2157,37 @@ export async function GET(request: NextRequest) {
       .map((match) => match[1])
     const upperThicknesses = Array.from(rawQuery.matchAll(/(?:техноруф\s+в|(?:^|\s)в)(?:\s+проф|\s+оптим[ао]|\s+экстра)?\D{0,24}(\d{2,3})/gi))
       .map((match) => match[1])
-    const fallbackRoofThicknesses = constructionThicknesses.length > 0 ? constructionThicknesses : ['120', '50', '100']
-    const preferredLowerThicknesses = lowerThicknesses.length > 0 ? lowerThicknesses : fallbackRoofThicknesses
-    const preferredUpperThicknesses = upperThicknesses.length > 0 ? upperThicknesses : fallbackRoofThicknesses
-    const wantsLowerLayer = lowerThicknesses.length > 0 || /техноруф\s+н|руф\s+н|(?:^|\s)н\s+(?:проф|оптим|экстра)|нижн/i.test(rawQuery)
-    const wantsUpperLayer = upperThicknesses.length > 0 || /техноруф\s+в|руф\s+в|(?:^|\s)в\s+(?:проф|оптим|экстра)|верхн/i.test(rawQuery)
+    const baswoolLowerGrades = baswoolRoofMatches
+      .filter((match) => (match[1] || '').toLowerCase() === 'н')
+      .map((match) => Number(match[2]))
+      .filter(Boolean)
+    const baswoolUpperGrades = baswoolRoofMatches
+      .filter((match) => (match[1] || '').toLowerCase() === 'в')
+      .map((match) => Number(match[2]))
+      .filter(Boolean)
+    const baswoolGradeNumberSet = new Set(baswoolRoofGradeNumbers)
+    const roofThicknessesFromQuery = constructionThicknesses.filter((value) => !baswoolGradeNumberSet.has(value))
+    const lowerThicknessesWithoutGrades = lowerThicknesses.filter((value) => !baswoolGradeNumberSet.has(value))
+    const upperThicknessesWithoutGrades = upperThicknesses.filter((value) => !baswoolGradeNumberSet.has(value))
+    const fallbackRoofThicknesses = roofThicknessesFromQuery.length > 0 ? roofThicknessesFromQuery : ['120', '50', '100']
+    const preferredLowerThicknesses = lowerThicknessesWithoutGrades.length > 0 ? lowerThicknessesWithoutGrades : fallbackRoofThicknesses
+    const preferredUpperThicknesses = upperThicknessesWithoutGrades.length > 0 ? upperThicknessesWithoutGrades : fallbackRoofThicknesses
+    const wantsLowerLayer =
+      lowerThicknesses.length > 0 ||
+      baswoolLowerGrades.length > 0 ||
+      /техноруф\s+н|руф\s+н|(?:^|\s)н\s+(?:проф|оптим|экстра)|нижн/i.test(rawQuery)
+    const wantsUpperLayer =
+      upperThicknesses.length > 0 ||
+      baswoolUpperGrades.length > 0 ||
+      /техноруф\s+в|руф\s+в|(?:^|\s)в\s+(?:проф|оптим|экстра)|верхн/i.test(rawQuery)
+    const lowerGradePreference = Array.from(new Set([
+      ...baswoolLowerGrades,
+      ...(/н\s+проф/i.test(rawQuery) ? [120, 110, 100] : [100, 110, 120]),
+    ]))
+    const upperGradePreference = Array.from(new Set([
+      ...baswoolUpperGrades,
+      ...(/в\s+оптим[ао]/i.test(rawQuery) ? [160, 170, 180, 190] : [170, 180, 160, 190]),
+    ]))
 
     const roofQueries: PromiseLike<{ data: any[] | null }>[] = []
     if (wantsLowerLayer || !wantsUpperLayer) {
@@ -2139,7 +2233,7 @@ export async function GET(request: NextRequest) {
         preferredLowerThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
       ),
       preferredLowerThicknesses,
-      /н\s+проф/i.test(rawQuery) ? [120, 110, 100] : [100, 110, 120]
+      lowerGradePreference
     )
 
     const upperItems = sortBaswoolRoof(
@@ -2148,7 +2242,7 @@ export async function GET(request: NextRequest) {
         preferredUpperThicknesses.some((thickness) => hasBoardThickness(item.name, thickness))
       ),
       preferredUpperThicknesses,
-      /в\s+оптим[ао]/i.test(rawQuery) ? [160, 170, 180, 190] : [170, 180, 160, 190]
+      upperGradePreference
     )
 
     const technoRoofItems = await enrichNomenclatureWithProductMeta(
@@ -2159,8 +2253,9 @@ export async function GET(request: NextRequest) {
     const sortedTechnoRoofItems = [...technoRoofItems].sort((a, b) => {
       const score = (item: NomenclatureItem) => {
         const name = item.name || ''
-        if (/ТЕХНОРУФ\s+Н\s+ПРОФ/i.test(name) && preferredLowerThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 0
-        if (/ТЕХНОРУФ\s+В\s+ОПТИМ/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 1
+        if (wantsUpperLayer && /ТЕХНОРУФ\s+В\s+ПРОФ/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 0
+        if (wantsLowerLayer && /ТЕХНОРУФ\s+Н\s+ПРОФ/i.test(name) && preferredLowerThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 0
+        if (wantsUpperLayer && /ТЕХНОРУФ\s+В\s+ОПТИМ/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 1
         if (/ТЕХНОРУФ\s+Н/i.test(name) && preferredLowerThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 10
         if (/ТЕХНОРУФ\s+В/i.test(name) && preferredUpperThicknesses.some((thickness) => hasBoardThickness(name, thickness))) return 20
         return 99
