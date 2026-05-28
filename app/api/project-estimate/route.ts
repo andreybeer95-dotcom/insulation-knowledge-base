@@ -43,6 +43,28 @@ type ReviewItem = {
   alternatives?: Array<{ code: string | null; name: string | null; brand: string | null }>;
 };
 
+type SystemRuleContext = {
+  id?: string | null;
+  rule_name?: string | null;
+  condition?: string | null;
+  rule_text?: string | null;
+  priority?: number | null;
+  category?: string | null;
+  is_prohibition?: boolean | null;
+};
+
+type ProjectSystemContext = {
+  id: string;
+  name: string;
+  source: "pdf" | "inferred" | "nav_tn";
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  navAnalogId?: string | null;
+  navAnalogName?: string | null;
+  warning?: string | null;
+  rules: SystemRuleContext[];
+};
+
 type QuoteItem = {
   no: number;
   code: string | null;
@@ -1491,16 +1513,168 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
   };
 }
 
+function normalizeSystemText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[®™]/g, "")
+    .replace(/[^a-zа-я0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSystemNameFromRule(rule: SystemRuleContext) {
+  const match = String(rule.rule_name || "").match(/^Система\s+(.+?)(?:\s+—|$)/i);
+  return match?.[1]?.trim() || "";
+}
+
+function detectProjectSystemContext(text: string, layers: DetectedLayer[]): ProjectSystemContext | null {
+  const lower = text.toLowerCase();
+  const hasLayer = (key: string) => layers.some((layer) => layer.key === key);
+  const hasPvcMembrane =
+    /пвх|pvc|plastfoil|пластфойл|logicroof|ecoplast/i.test(lower) ||
+    layers.some((layer) => /пвх-мембран|pvc|plastfoil|logicroof/i.test(`${layer.key} ${layer.role} ${layer.label}`));
+  const hasProfiledSheet =
+    /профилированн[а-я\s-]*лист|профлист|н\s*114|н114|настил/i.test(lower) ||
+    hasLayer("profiled_sheet_n114") ||
+    hasLayer("profiled_sheet_n57");
+  const hasMechanicalFastening =
+    /механическ[а-я\s-]*креп|телескопическ[а-я\s-]*креп|саморез|шайб/i.test(lower) ||
+    hasLayer("roof_fastener_telescopic_130");
+  const hasPirLayer =
+    /pirromembrane|pirro|пирро|logicpir|пир[-\s]*плит/i.test(lower) ||
+    hasLayer("pirromembrane_70") ||
+    layers.some((layer) => layer.key.startsWith("logicpir_"));
+  const hasStoneWoolLayer =
+    /dirock|дирок|техноруф|минераловатн/i.test(lower) ||
+    hasLayer("dirock_ruf_n_60") ||
+    layers.some((layer) => layer.key.startsWith("technoruf_"));
+  const hasPenoplexKombi =
+    /комби\s*(?:pir|пир)|пеноплекс[\s\S]{0,120}комби|plastfoil\s+classic|пластфойл[\s\S]{0,40}classic/i.test(lower);
+
+  const directSystems: Array<{ id: string; name: string; pattern: RegExp }> = [
+    {
+      id: "tn_roof_smart_pir",
+      name: "ТН-КРОВЛЯ Смарт PIR",
+      pattern: /тн[-\s]*кровл[яьи]\s*смарт\s*(?:pir|пир)|смарт\s*(?:pir|пир)|logicpir\s+prof[\s\S]{0,160}(?:профлист|пвх|logicroof)/i,
+    },
+    {
+      id: "tn_roof_klassik",
+      name: "ТН-КРОВЛЯ Классик",
+      pattern: /тн[-\s]*кровл[яьи]\s*классик(?!\s*проф)|кровл[яьи][\s\S]{0,80}классик(?!\s*проф)/i,
+    },
+    {
+      id: "tn_roof_smart",
+      name: "ТН-КРОВЛЯ Смарт",
+      pattern: /тн[-\s]*кровл[яьи]\s*смарт(?!\s*(?:pir|пир))|кровл[яьи][\s\S]{0,80}смарт(?!\s*(?:pir|пир))/i,
+    },
+    {
+      id: "tn_roof_praktik_kley",
+      name: "ТН-КРОВЛЯ Практик Клей",
+      pattern: /тн[-\s]*кровл[яьи]\s*практик\s*клей|практик\s*клей|logicroof\s+bond|v[-\s]*gr\s*fb/i,
+    },
+  ];
+
+  for (const system of directSystems) {
+    if (system.pattern.test(lower)) {
+      return {
+        ...system,
+        source: "nav_tn",
+        confidence: "high",
+        reason: "Название системы или характерный системный материал найден в PDF.",
+        navAnalogId: system.id,
+        navAnalogName: system.name,
+        rules: [],
+      };
+    }
+  }
+
+  if (hasPenoplexKombi || (/plastfoil/i.test(lower) && hasPirLayer && hasStoneWoolLayer)) {
+    return {
+      id: "penoplex_kombi_pir_plastfoil",
+      name: "Пеноплекс Комби PIR / Plastfoil Classic",
+      source: "pdf",
+      confidence: hasPvcMembrane && hasPirLayer && hasStoneWoolLayer ? "high" : "medium",
+      reason: "В PDF найдены Plastfoil Classic/Art, PIR-слой PirroMembrane, минватный слой Dirock РУФ Н и механическое крепление к профлисту.",
+      navAnalogId: "tn_roof_smart_pir",
+      navAnalogName: "ТН-КРОВЛЯ Смарт PIR",
+      warning: "Это не система ТЕХНОНИКОЛЬ: NAV.TN-карточку использовать только как ближайшую схему ролей и расходных коэффициентов. Материалы Пеноплекс/Plastfoil не заменять автоматически без согласования.",
+      rules: [],
+    };
+  }
+
+  if (hasPvcMembrane && hasProfiledSheet && hasMechanicalFastening) {
+    const analog = hasPirLayer ? {
+      id: "tn_roof_smart_pir",
+      name: "ТН-КРОВЛЯ Смарт PIR",
+    } : {
+      id: "tn_roof_klassik",
+      name: "ТН-КРОВЛЯ Классик",
+    };
+
+    return {
+      id: analog.id,
+      name: analog.name,
+      source: "inferred",
+      confidence: hasStoneWoolLayer || hasPirLayer ? "medium" : "low",
+      reason: "Система определена по признакам: ПВХ-мембрана, профлист/настил и механическое крепление.",
+      navAnalogId: analog.id,
+      navAnalogName: analog.name,
+      warning: "Система определена по признакам, а не по прямому названию в проекте; перед КП сверить с листом состава кровли.",
+      rules: [],
+    };
+  }
+
+  return null;
+}
+
+async function loadProjectSystemRules(system: ProjectSystemContext | null) {
+  if (!system) return [];
+
+  try {
+    const supabase = getServiceSupabase();
+    const { data, error } = await supabase
+      .from("selection_rules")
+      .select("id, rule_name, condition, rule_text, priority, is_prohibition, category")
+      .order("priority", { ascending: true });
+
+    if (error) {
+      console.warn("project system rules search skipped:", errorMessage(error));
+      return [];
+    }
+
+    const names = [system.name, system.navAnalogName].filter(Boolean).map((name) => normalizeSystemText(String(name)));
+    const ids = [system.id, system.navAnalogId].filter(Boolean).map((id) => normalizeSystemText(String(id)));
+    const rules = (data ?? []) as SystemRuleContext[];
+
+    return rules
+      .filter((rule) => {
+        const ruleSystemName = normalizeSystemText(extractSystemNameFromRule(rule));
+        if (ruleSystemName && names.includes(ruleSystemName)) return true;
+
+        const haystack = normalizeSystemText(`${rule.category || ""} ${rule.condition || ""} ${rule.rule_name || ""} ${rule.rule_text || ""}`);
+        if (ids.some((id) => id && haystack.includes(id))) return true;
+        return names.some((name) => name && haystack.includes(name));
+      })
+      .slice(0, 8);
+  } catch (error) {
+    console.warn("project system rules search failed:", errorMessage(error));
+    return [];
+  }
+}
+
 function buildProjectQuery(summary: {
   direction: string;
   question: string;
   area: AreaInfo;
   layers: DetectedLayer[];
+  systemContext?: ProjectSystemContext | null;
 }) {
   const layerText = summary.layers.map((layer) => layer.label).join("; ");
   return [
     `Проект ${summary.direction || "кровля"}`,
     summary.question,
+    summary.systemContext ? `система ${summary.systemContext.name}` : "",
     summary.area.value ? `площадь ${summary.area.value} м2` : "",
     layerText,
     "подбери материалы с кодами 1С, коды не придумывать",
@@ -1551,6 +1725,7 @@ function buildQuoteItems(invoiceItems: InvoiceItem[]): QuoteItem[] {
 function buildQuoteDraft(summary: {
   fileName: string;
   area: AreaInfo;
+  systemContext?: ProjectSystemContext | null;
   quoteItems: QuoteItem[];
   invoiceItems: InvoiceItem[];
   notFound: ReviewItem[];
@@ -1560,6 +1735,26 @@ function buildQuoteDraft(summary: {
   lines.push(`Черновик КП без цен: ${summary.fileName}`);
   lines.push(`Площадь: ${summary.area.value ? `${summary.area.value} м2 (${summary.area.source})` : "не найдена"}`);
   lines.push("");
+
+  if (summary.systemContext) {
+    lines.push(`Система проекта: ${summary.systemContext.name} (${summary.systemContext.confidence})`);
+    if (summary.systemContext.navAnalogName && summary.systemContext.navAnalogName !== summary.systemContext.name) {
+      lines.push(`Ближайшая NAV.TN-схема для сверки ролей: ${summary.systemContext.navAnalogName}`);
+    }
+    lines.push(`Почему: ${summary.systemContext.reason}`);
+    if (summary.systemContext.warning) {
+      lines.push(`Важно: ${summary.systemContext.warning}`);
+    }
+    if (summary.systemContext.rules.length) {
+      const ruleNames = summary.systemContext.rules
+        .map((rule) => rule.rule_name)
+        .filter(Boolean)
+        .slice(0, 4)
+        .join("; ");
+      lines.push(`Подтянуты системные правила: ${ruleNames}`);
+    }
+    lines.push("");
+  }
 
   if (summary.quoteItems.length) {
     lines.push("В счет:");
@@ -1723,7 +1918,14 @@ export async function POST(request: NextRequest) {
 
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
     const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
-    const projectQuery = buildProjectQuery({ direction, question, area, layers });
+    const detectedProjectSystem = detectProjectSystemContext(extractedText, layers);
+    const projectSystem = detectedProjectSystem
+      ? {
+        ...detectedProjectSystem,
+        rules: await loadProjectSystemRules(detectedProjectSystem),
+      }
+      : null;
+    const projectQuery = buildProjectQuery({ direction, question, area, layers, systemContext: projectSystem });
 
     const invoiceItems: InvoiceItem[] = [];
     const notFound: ReviewItem[] = [];
@@ -1803,6 +2005,7 @@ export async function POST(request: NextRequest) {
     const quoteDraft = buildQuoteDraft({
       fileName: file.name,
       area,
+      systemContext: projectSystem,
       quoteItems,
       invoiceItems,
       notFound,
@@ -1851,6 +2054,7 @@ export async function POST(request: NextRequest) {
       invoiceItems,
       quoteItems,
       quoteDraft,
+      projectSystem,
       projectOnly,
       notFound,
       roofFastenerGuidance,
