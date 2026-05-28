@@ -1770,7 +1770,7 @@ export async function GET(request: NextRequest) {
         const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
         return (
           /wired\s*mat|вайред\s*мат|прошивн.*мат|тех.*мат|мат.*техническ|rockwool.*мат|роквул.*мат|мат.*rockwool|мат.*роквул/i.test(text) &&
-          !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп|кф\s*1|кф1/i.test(text)
+          !/праймер|грунт|клей|герметик|плита|цилиндр|скорлуп|кф\s*1|кф1|ветош|ткань|полотно|хпп|мытья полов|холстопрошив/i.test(text)
         )
       }
       const sortTechnicalMat = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
