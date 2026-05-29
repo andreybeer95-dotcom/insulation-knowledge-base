@@ -92,7 +92,7 @@ let localNomenclatureCache: NomenclatureItem[] | null = null;
 
 type AreaInfo = {
   value: number | null;
-  source: "manager_input" | "pdf_text" | "axes_estimate" | "not_found";
+  source: "manager_input" | "pdf_text" | "axes_estimate" | "roof_plan_estimate" | "not_found";
   confidence: "high" | "medium" | "low" | "none";
   note: string;
 };
@@ -138,6 +138,32 @@ function toLooseNumber(value: string) {
 function round(value: number, digits = 2) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function looksLikeRoofPlan(text: string) {
+  return /план\s+кровл|тн-кровля|tn-кровля|кровл[\s\S]{0,120}уклон|воронк[\s\S]{0,80}водосток/i.test(text);
+}
+
+function detectRoofPlanDimensionArea(text: string) {
+  if (!looksLikeRoofPlan(text)) return null;
+
+  const scanWindow = text.slice(0, Math.min(text.length, 3500));
+  const dimensionsM = Array.from(scanWindow.matchAll(/\b(\d{2,3})\s?000\b/g))
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value >= 15 && value <= 300);
+
+  const unique = Array.from(new Set(dimensionsM)).sort((a, b) => b - a);
+  if (unique.length < 2) return null;
+
+  const [first, second] = unique;
+  const area = first * second;
+  if (!Number.isFinite(area) || area < 100) return null;
+
+  return {
+    first,
+    second,
+    area: round(area, 2),
+  };
 }
 
 function sumAreaMatches(text: string, pattern: RegExp) {
@@ -263,6 +289,16 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
         note: `Площадь оценена по габаритам в осях ${first} x ${second} м. Для счета нужна площадь кровли по проекту.`,
       };
     }
+  }
+
+  const roofPlanArea = detectRoofPlanDimensionArea(text);
+  if (roofPlanArea) {
+    return {
+      value: roofPlanArea.area,
+      source: "roof_plan_estimate",
+      confidence: "low",
+      note: `Площадь предварительно оценена по габаритной размерной цепочке плана кровли: ${roofPlanArea.first} x ${roofPlanArea.second} м. Это площадь габаритного прямоугольника; для счета нужно сверить контур, вырезы, перепады и ведомость кровли.`,
+    };
   }
 
   return {
@@ -497,6 +533,7 @@ function detectRoofWoolLayers(lower: string): DetectedLayer[] {
 
 function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
+  const hasRoofPlanContext = looksLikeRoofPlan(text);
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|экструзионн[а-я\s-]*пенополистирол|пенополистирол|carbon\s+prof)[^\d]{0,80}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const roofSpecAreas = extractRoofSpecAreas(lower);
@@ -523,6 +560,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const hasGeberitPluvia = /geberit\s+pluvia|геберит\s+плювиа/i.test(lower);
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
   const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
+  const hasInternalFunnelOnRoofPlan = hasRoofPlanContext && /воронк[\s\S]{0,120}внутренн[\s\S]{0,60}водосток/i.test(lower);
   const geberitPluviaUnitCount = hasGeberitPluvia ? detectGeberitPluviaCount(lower) : undefined;
   const funnelUnitCount = hasParapetFunnel ? detectParapetFunnelCount(lower) ?? detectUnitCount(lower, /воронк[а-я]*/) : detectUnitCount(lower, /воронк[а-я]*/);
 
@@ -883,7 +921,9 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         : ["Воронка ТехноНИКОЛЬ", "Воронка кровельная", "Воронка с обжимным фланцем"],
       quantityType: "project",
       unitCount: funnelUnitCount,
-      note: "Количество и тип воронок считать по проекту или калькулятору NAV.TN; в счет ставить только после подтверждения водосборных участков.",
+      note: hasInternalFunnelOnRoofPlan
+        ? "Воронки внутреннего водостока указаны на плане/в примечаниях кровли. Количество нужно снять с графики плана кровли или ведомости; тип, диаметр, обогрев и совместимость с системой подтвердить перед КП."
+        : "Количество и тип воронок считать по проекту или калькулятору NAV.TN; в счет ставить только после подтверждения водосборных участков.",
     },
   ];
 
