@@ -1467,6 +1467,10 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("ekp") && /экп/i.test(item.name ?? "")) score += 10;
   if (layer.key === "primer_08" && /0?8|№08|n08/i.test(item.name ?? "")) score += 12;
   if (layer.key === "pvc_logicroof_vrp" && /logicroof/i.test(item.name ?? "") && /v-rp/i.test(item.name ?? "")) score += 16;
+  if (layer.key === "pvc_logicroof_vrp" && /v[-\s]*rp\s*fr|\bfr\b/i.test(requested)) {
+    if (/v[-\s]*rp\s*fr|\bfr\b/i.test(item.name ?? "")) score += 40;
+    else if (/v[-\s]*rp/i.test(item.name ?? "")) score -= 25;
+  }
   if (layer.key === "pvc_logicroof_vrp" && layer.thicknessMm) {
     const desiredThickness = String(layer.thicknessMm).replace(".", "[,.]");
     const hasDesiredThickness = new RegExp(`${desiredThickness}\\s*(?:мм|mm)?`).test(name);
