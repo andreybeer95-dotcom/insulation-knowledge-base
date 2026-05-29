@@ -630,6 +630,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const hasCarbonProf = hasPlainCarbonProf;
   const roofWoolLayers = detectRoofWoolLayers(lower);
   const hasSegmentedRoofSpec = roofSpecAreas.membraneOnConcreteArea > 0 || roofSpecAreas.membraneOnProfiledSheetArea > 0;
+  const profileSheetRoofSegmentNeedsPlanCheck = roofSpecAreas.membraneOnProfiledSheetArea > 0 && hasSegmentedRoofSpec;
   const roofWoolLayersForUse = roofWoolLayers.filter((layer) => {
     if (
       hasSegmentedRoofSpec &&
@@ -857,7 +858,10 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       thicknessMm: 70,
       areaOverride: roofSpecAreas.membraneOnProfiledSheetArea,
       quantityType: "m3",
-      note: "Слой относится к типу кровли по профлисту; площадь взята из спецификации кровельного покрытия.",
+      reviewOnly: profileSheetRoofSegmentNeedsPlanCheck,
+      note: profileSheetRoofSegmentNeedsPlanCheck
+        ? "Слой относится к типу кровли по профлисту; площадь взята из спецификации, но перед КП нужно показать/подтвердить на плане участок кровли с профлистом и PIR 70 мм."
+        : "Слой относится к типу кровли по профлисту; площадь взята из спецификации кровельного покрытия.",
     },
     ...roofWoolLayersWithStatementQuantities,
     {
@@ -870,7 +874,10 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       thicknessMm: 100,
       areaOverride: roofSpecAreas.membraneOnProfiledSheetArea,
       quantityType: "m3",
-      note: "Слой относится к типу кровли по профлисту; конкретную марку ТЕХНОРУФ Н ПРОФ сверить по ведомости.",
+      reviewOnly: profileSheetRoofSegmentNeedsPlanCheck,
+      note: profileSheetRoofSegmentNeedsPlanCheck
+        ? "Слой относится к типу кровли по профлисту; перед КП нужно подтвердить на плане участок кровли с профлистом, PIR 70 мм и ТЕХНОРУФ Н ПРОФ 100 мм."
+        : "Слой относится к типу кровли по профлисту; конкретную марку ТЕХНОРУФ Н ПРОФ сверить по ведомости.",
     },
     {
       key: "logicpir_slope",
