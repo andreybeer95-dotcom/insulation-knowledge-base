@@ -432,7 +432,7 @@ function detectRoofWoolLayers(lower: string): DetectedLayer[] {
     });
   };
 
-  for (const match of lower.matchAll(/технор[уо]ф\s*([вн])\s*(экстра|проф|оптима)\s*(\d{2,3})(?:\s*мм)?/gi)) {
+  for (const match of lower.matchAll(/технор[уо]ф\s*([вн])\s*(экстра|проф|оптима)\s*[-–—]?\s*(\d{2,3})(?:\s*мм)?/gi)) {
     const index = match.index ?? 0;
     const context = lower.slice(Math.max(0, index - 360), index + 360);
     if (/кровл|logicroof|профлист|мембран|паробарьер|состав/i.test(context)) {
@@ -479,7 +479,7 @@ function detectRoofWoolLayers(lower: string): DetectedLayer[] {
 
 function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
-  const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|пенополистирол)[^\d]{0,40}(\d{2,3})\s*мм/i);
+  const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|экструзионн[а-я\s-]*пенополистирол|пенополистирол|carbon\s+prof)[^\d]{0,80}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const roofSpecAreas = extractRoofSpecAreas(lower);
   const pvcMembraneThicknessMatch = lower.match(/logicroof\s+v-rp[\s\S]{0,80}?(\d(?:[,.]\d)?)\s*мм/i)
@@ -527,6 +527,16 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       note: pvcMembraneThicknessMm
         ? "Марку и толщину мембраны сверить по проекту перед КП."
         : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
+    },
+    {
+      key: "glass_fleece_100",
+      role: "разделительный слой",
+      label: "Стеклохолст 100 г/м2",
+      detected: includesAny(lower, [/стеклохолст[\s\S]{0,40}100\s*(?:г|гр|g)\s*\/?\s*(?:м2|м²|m2)/i]),
+      searchTerms: ["Стеклохолст ТехноНИКОЛЬ 100", "Стеклохолст 100", "Стеклохолст"],
+      factor: 1.18,
+      quantityType: "m2",
+      note: "Разделительный слой системы ПВХ-кровли; количество считать по площади кровли с коэффициентом системы.",
     },
     ...plastfoilLayers,
     {
@@ -737,7 +747,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       key: "xps",
       role: "теплоизоляция",
       label: xpsThicknessMm ? `XPS ${xpsThicknessMm} мм` : "XPS",
-      detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i]),
+      detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i, /carbon\s+prof/i]),
       searchTerms: xpsThicknessMm
         ? [`CARBON ECO ${xpsThicknessMm}`, `CARBON PROF ${xpsThicknessMm}`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
         : ["CARBON ECO", "CARBON PROF", "XPS", "ЭППС"],
@@ -1051,6 +1061,20 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
       };
     }
 
+    if (/стеклохолст/.test(text)) {
+      return {
+        key: `ai_glass_fleece_100_${index}`,
+        role: "разделительный слой",
+        label: thicknessMm ? `Стеклохолст ${thicknessMm} г/м2` : material || "Стеклохолст",
+        detected: true,
+        searchTerms: ["Стеклохолст ТехноНИКОЛЬ 100", "Стеклохолст 100", material].filter(Boolean),
+        factor: 1.18,
+        areaOverride,
+        quantityType: "m2",
+        note,
+      };
+    }
+
     if (/isover|изовер|dirock|дирок|минераловатн[а-я\s-]*(?:ват|утеплител)|руф\s*[вн]/i.test(text)) {
       const isUpper = /руф\s*в|ruf\s*v|верхн/i.test(text);
       const label = thicknessMm ? `${material || "Минераловатный утеплитель кровли"} ${thicknessMm} мм` : material || "Минераловатный утеплитель кровли";
@@ -1263,6 +1287,7 @@ function layerFamily(layer: DetectedLayer) {
   if (key === "pergamin") return "pergamin";
   if (key === "primer_08") return "primer_08";
   if (key.includes("logicpir_slope") || text.includes("logicpir slope")) return "logicpir_slope";
+  if (key.includes("glass_fleece") || text.includes("стеклохолст")) return "glass_fleece";
   if (key.includes("roof_funnel") || text.includes("воронк")) return "roof_funnel";
   if (key.includes("logicpir_prof") || text.includes("logicpir prof")) return `logicpir_prof_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
   if (key.includes("technoruf") || text.includes("техноруф")) return `technoruf_${layer.thicknessMm ?? parseAiThickness(text) ?? "unknown"}`;
