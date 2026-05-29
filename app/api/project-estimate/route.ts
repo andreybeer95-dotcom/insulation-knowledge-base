@@ -623,11 +623,25 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const hasLogicroofVrpFr = /logicroof\s+v[-\s]*rp\s*fr/i.test(lower);
+  const hasPvcMembraneG1Requirement = /(?:logicroof\s+v[-\s]*rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[\s\S]{0,140}?(?:г\s*1|g\s*1)|(?:г\s*1|g\s*1)[\s\S]{0,140}?(?:logicroof\s+v[-\s]*rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)/i.test(lower);
+  const hasPvcMembraneG1ThicknessConflict = hasPvcMembraneG1Requirement && pvcMembraneThicknessMm === 1.5;
   const hasCarbonProfSlope = /carbon\s+prof\s+slope|карбон\s+проф\s+slope/i.test(lower);
   const hasPlainCarbonProf = /carbon\s+prof(?!\s+slope)|карбон\s+проф(?!\s+slope)/i.test(lower);
   const hasCarbonProf = hasPlainCarbonProf;
   const roofWoolLayers = detectRoofWoolLayers(lower);
-  const roofWoolLayersWithStatementQuantities = roofWoolLayers.map((layer) => {
+  const hasSegmentedRoofSpec = roofSpecAreas.membraneOnConcreteArea > 0 || roofSpecAreas.membraneOnProfiledSheetArea > 0;
+  const roofWoolLayersForUse = roofWoolLayers.filter((layer) => {
+    if (
+      hasSegmentedRoofSpec &&
+      /технор[уо]ф\s+н\s+проф/i.test(layer.label) &&
+      layer.thicknessMm === 100 &&
+      roofSpecAreas.membraneOnProfiledSheetArea > 0
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const roofWoolLayersWithStatementQuantities = roofWoolLayersForUse.map((layer) => {
     const isTechnorufNProf50 =
       /технор[уо]ф\s+н\s+проф/i.test(layer.label) &&
       layer.thicknessMm === 50 &&
@@ -650,6 +664,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const hasParobarrierCa500 = /паробарьер\s*[сc][аa]\s*500|[сc][аa]\s*500/i.test(lower);
   const hasParobarrierC = /паробарьер\s*[сc](?![аa]\s*500)/i.test(lower);
   const hasTechnobarrier = /технобарьер/i.test(lower);
+  const hasSegmentedVaporBarrierSpec = hasSegmentedRoofSpec && hasTechnobarrier && (hasParobarrierC || hasParobarrierCa500);
   const hasExactHydrowindMembrane =
     /альфа\s+(?:вент|топ)|мастер\s+вент|georex|гидро-?ветрозащитн[\s\S]{0,80}технониколь|технониколь[\s\S]{0,80}гидро-?ветрозащитн/i.test(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
@@ -693,8 +708,11 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         : undefined,
       quantityType: "m2",
       thicknessMm: pvcMembraneThicknessMm,
+      reviewOnly: hasPvcMembraneG1ThicknessConflict,
       note: pvcMembraneThicknessMm
-        ? "Марку и толщину мембраны сверить по проекту перед КП."
+        ? hasPvcMembraneG1ThicknessConflict
+          ? "В проекте одновременно указаны LOGICROOF V-RP 1,5 мм и требование Г1/G1. По правилу менеджера это конфликт: Г1-мембрана обычно идет 1,2 мм; нужно уточнить, что важнее заказчику — толщина 1,5 мм или группа горючести Г1."
+          : "Марку и толщину мембраны сверить по проекту перед КП."
         : roofStatementQuantities.logicroofVrpM2 > 0
           ? "Количество LOGICROOF V-RP взято из ведомости материалов кровли, но толщина мембраны не указана; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм."
           : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
@@ -865,6 +883,30 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       note: "Количество клиновидных плит LOGICPIR SLOPE считать по плану уклонов/раскладке элементов, не по общей площади.",
     },
     {
+      key: "technobarrier_concrete_spec",
+      role: "пароизоляция по Ж/Б основанию",
+      label: "ТЕХНОБАРЬЕР",
+      detected: hasSegmentedVaporBarrierSpec && roofSpecAreas.membraneOnConcreteArea > 0,
+      searchTerms: ["ТЕХНОБАРЬЕР"],
+      factor: 1.12,
+      areaOverride: roofSpecAreas.membraneOnConcreteArea || undefined,
+      quantityType: "m2",
+      note: "Слой относится к типу кровли по Ж/Б основанию; площадь взята из спецификации кровельного покрытия.",
+    },
+    {
+      key: "parobarrier_profile_spec",
+      role: "пароизоляция по профлисту",
+      label: hasParobarrierCa500 ? "Паробарьер СА500" : "Паробарьер C",
+      detected: hasSegmentedVaporBarrierSpec && roofSpecAreas.membraneOnProfiledSheetArea > 0,
+      searchTerms: hasParobarrierCa500
+        ? ["Паробарьер СА 500", "Паробарьер СА500", "Паробарьер"]
+        : ["Паробарьер С", "Паробарьер C", "Паробарьер"],
+      factor: 1.12,
+      areaOverride: roofSpecAreas.membraneOnProfiledSheetArea || undefined,
+      quantityType: "m2",
+      note: "Слой относится к типу кровли по профлисту; площадь взята из спецификации кровельного покрытия.",
+    },
+    {
       key: "technobarrier",
       role: "пароизоляция",
       label: hasParobarrierCa500
@@ -892,8 +934,11 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         }
         : undefined,
       quantityType: "m2",
+      reviewOnly: hasSegmentedVaporBarrierSpec,
       note: hasParobarrierCa500
         ? "В проекте найден Паробарьер СА500; количество посчитано по основной площади ПВХ-мембраны, перед КП сверить по узлам и нахлестам."
+        : hasSegmentedVaporBarrierSpec
+          ? "В проекте есть разные пароизоляции для разных оснований; вместо общей строки используются отдельные слои по Ж/Б и профлисту."
         : hasParobarrierC && !hasTechnobarrier
           ? "В проекте найден Паробарьер C; перед КП сверить точную модификацию и ширину рулона."
           : hasTechnobarrier && !hasParobarrierC
@@ -989,6 +1034,10 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       factor: 1.03,
       thicknessMm: xpsThicknessMm,
       quantityType: xpsThicknessMm ? "m3" : "m2",
+      reviewOnly: hasSegmentedRoofSpec && !hasPlainCarbonProf,
+      note: hasSegmentedRoofSpec && !hasPlainCarbonProf
+        ? "XPS/экструзионный пенополистирол найден в проекте, но не входит в распознанный пирог мембранной кровли; в счет не ставить без проверки листа состава/ведомости."
+        : undefined,
     },
     {
       key: "keramzit_slope",
@@ -1966,13 +2015,15 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
 
   if (layer.quantityType === "m2") {
     const qty = basisArea * (layer.factor ?? 1);
-    const rollArea = parseRollArea(item?.name ?? null);
-    const rolls = rollArea !== null ? Math.ceil(qty / rollArea) : null;
+    const packageArea = parsePackageArea(item?.name ?? null);
+    const rollArea = packageArea === null ? parseRollArea(item?.name ?? null) : null;
     return {
       value: round(qty, 2),
-      text: rolls !== null && rollArea !== null
-        ? `${round(qty, 2)} м2, ориентир ${rolls} рул. по ${round(rollArea, 2)} м2`
-        : `${round(qty, 2)} м2`,
+      text: packageArea !== null
+        ? `${round(qty, 2)} м2, ориентир ${Math.ceil(qty / packageArea)} уп. по ${round(packageArea, 4)} м2`
+        : rollArea !== null
+          ? `${round(qty, 2)} м2, ориентир ${Math.ceil(qty / rollArea)} рул. по ${round(rollArea, 2)} м2`
+          : `${round(qty, 2)} м2`,
     };
   }
 
