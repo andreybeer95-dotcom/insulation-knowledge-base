@@ -111,6 +111,11 @@ type DetectedLayer = {
   note?: string;
   unitCount?: number;
   areaOverride?: number;
+  quantityOverride?: {
+    value: number;
+    unit: "m2" | "m3" | "шт";
+    source: string;
+  };
 };
 
 const NUMBER = String.raw`(\d+(?:[,.]\d+)?)`;
@@ -324,6 +329,73 @@ function detectUnitCount(text: string, keyword: RegExp) {
     if (keywordPattern.test(context)) return Number(match[1]);
   }
   return undefined;
+}
+
+function normalizeRoofStatementText(text: string) {
+  return normalizeText(text)
+    .replace(/logi\s+croof/gi, "LOGICROOF")
+    .replace(/logi\s+cpir/gi, "LOGICPIR")
+    .replace(/м\s*²/gi, "м2")
+    .replace(/м\s*³/gi, "м3")
+    .toLowerCase();
+}
+
+function uniqueNumbers(values: number[]) {
+  const seen = new Set<string>();
+  const result: number[] = [];
+  for (const value of values) {
+    if (!Number.isFinite(value) || value <= 0) continue;
+    const key = round(value, 3).toFixed(3);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function extractQuantitiesAfterMaterial(statementText: string, materialPattern: RegExp, unit: "m2" | "m3") {
+  const result: number[] = [];
+  const re = new RegExp(materialPattern.source, materialPattern.flags.includes("i") ? "gi" : "g");
+  const unitPattern = unit === "m2" ? String.raw`м2|м²` : String.raw`м3|м³`;
+
+  for (const match of statementText.matchAll(re)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const before = statementText.slice(Math.max(0, index - 550), index);
+    const after = statementText.slice(index, index + 420);
+    const hasStatementContext = /ведомость\s+материалов\s+кровли|обозначение\s+наименование\s+толщина|(?:^|\s)к\d(?:[.,]\d)?\s*$|(?:^|\s)к\d(?:[.,]\d)?\s+сто/i.test(before);
+    const quantityMatch = after.match(new RegExp(String.raw`(\d{1,6}(?:[,.]\d{1,4})?)\s*(?:${unitPattern})`, "i"));
+    if (!quantityMatch?.[1]) continue;
+    const value = toNumber(quantityMatch[1]);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (!hasStatementContext && value < 500) continue;
+    result.push(value);
+  }
+
+  return uniqueNumbers(result);
+}
+
+function sumQuantities(values: number[]) {
+  return round(values.reduce((sum, value) => sum + value, 0), 3);
+}
+
+function extractRoofMaterialStatementQuantities(text: string) {
+  const statement = normalizeRoofStatementText(text);
+  const logicroofVrpM2 = extractQuantitiesAfterMaterial(statement, /кровельн[а-я\s-]*пвх\s+мембран[а-я\s-]*logicroof\s+v-rp|гидроизоляционн[а-я\s-]*мембран[а-я\s-]*logicroof\s+v-rp|logicroof\s+v-rp/i, "m2");
+  const logicpirProfM2 = extractQuantitiesAfterMaterial(statement, /плит[а-я\s-]*теплоизоляционн[а-я\s-]*logicpir\s+prof|logicpir\s+prof/i, "m2");
+  const carbonProfSlopeM3 = extractQuantitiesAfterMaterial(statement, /(?:экструзионн[а-я\s-]*пенополистирол\s+)?технониколь\s+carbon\s+prof\s+slope|carbon\s+prof\s+slope/i, "m3");
+  const technorufNProf50M3 = extractQuantitiesAfterMaterial(statement, /минераловатн[а-я\s-]*утеплител[а-я\s-]*технор[уо]ф\s+н\s+проф|технор[уо]ф\s+н\s+проф/i, "m3");
+  const parobarrierCa500M2 = extractQuantitiesAfterMaterial(statement, /паробарьер\s+[сc][аa]\s*500/i, "m2");
+  const geotextile300M2 = extractQuantitiesAfterMaterial(statement, /иглопробивн[а-я\s-]*геотекстил[а-я\s-]*технониколь\s+300|геотекстил[а-я\s-]*технониколь\s+300/i, "m2");
+
+  return {
+    logicroofVrpM2: sumQuantities(logicroofVrpM2),
+    logicpirProfM2: sumQuantities(logicpirProfM2),
+    carbonProfSlopeM3: sumQuantities(carbonProfSlopeM3),
+    technorufNProf50M3: sumQuantities(technorufNProf50M3),
+    parobarrierCa500M2: sumQuantities(parobarrierCa500M2),
+    geotextile300M2: sumQuantities(geotextile300M2),
+  };
 }
 
 function detectParapetFunnelCount(text: string) {
@@ -540,6 +612,7 @@ function detectRoofWoolLayers(lower: string): DetectedLayer[] {
 function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
   const hasRoofPlanContext = looksLikeRoofPlan(text);
+  const roofStatementQuantities = extractRoofMaterialStatementQuantities(text);
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|экструзионн[а-я\s-]*пенополистирол|пенополистирол|carbon\s+prof)[^\d]{0,80}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const roofSpecAreas = extractRoofSpecAreas(lower);
@@ -548,8 +621,27 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const hasLogicroofVrpFr = /logicroof\s+v[-\s]*rp\s*fr/i.test(lower);
-  const hasCarbonProf = /carbon\s+prof|карбон\s+проф/i.test(lower);
+  const hasCarbonProfSlope = /carbon\s+prof\s+slope|карбон\s+проф\s+slope/i.test(lower);
+  const hasPlainCarbonProf = /carbon\s+prof(?!\s+slope)|карбон\s+проф(?!\s+slope)/i.test(lower);
+  const hasCarbonProf = hasPlainCarbonProf;
   const roofWoolLayers = detectRoofWoolLayers(lower);
+  const roofWoolLayersWithStatementQuantities = roofWoolLayers.map((layer) => {
+    const isTechnorufNProf50 =
+      /технор[уо]ф\s+н\s+проф/i.test(layer.label) &&
+      layer.thicknessMm === 50 &&
+      roofStatementQuantities.technorufNProf50M3 > 0;
+
+    if (!isTechnorufNProf50) return layer;
+    return {
+      ...layer,
+      quantityOverride: {
+        value: roofStatementQuantities.technorufNProf50M3,
+        unit: "m3" as const,
+        source: "Объем ТЕХНОРУФ Н ПРОФ 50 мм взят из ведомости материалов кровли.",
+      },
+      note: "Объем ТЕХНОРУФ Н ПРОФ 50 мм взят из ведомости материалов кровли; перед КП сверить, что все типы кровли идут одной маркой и толщиной.",
+    };
+  });
   const plastfoilLayers = detectPlastfoilLayers(lower);
   const mainPvcMembraneArea = plastfoilLayers.find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride
     ?? (roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined);
@@ -590,11 +682,20 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         : [],
       factor: 1.15,
       areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
+      quantityOverride: roofStatementQuantities.logicroofVrpM2 > 0
+        ? {
+          value: roofStatementQuantities.logicroofVrpM2,
+          unit: "m2",
+          source: "Количество LOGICROOF V-RP взято из ведомости материалов кровли.",
+        }
+        : undefined,
       quantityType: "m2",
       thicknessMm: pvcMembraneThicknessMm,
       note: pvcMembraneThicknessMm
         ? "Марку и толщину мембраны сверить по проекту перед КП."
-        : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
+        : roofStatementQuantities.logicroofVrpM2 > 0
+          ? "Количество LOGICROOF V-RP взято из ведомости материалов кровли, но толщина мембраны не указана; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм."
+          : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
     },
     {
       key: "glass_fleece_100",
@@ -605,6 +706,22 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       factor: 1.18,
       quantityType: "m2",
       note: "Разделительный слой системы ПВХ-кровли; количество считать по площади кровли с коэффициентом системы.",
+    },
+    {
+      key: "geotextile_tn_300_statement",
+      role: "разделительный слой/геотекстиль",
+      label: "Иглопробивной геотекстиль ТЕХНОНИКОЛЬ 300 г/м2",
+      detected: roofStatementQuantities.geotextile300M2 > 0,
+      searchTerms: ["Геотекстиль ТЕХНОНИКОЛЬ 300", "Геотекстиль 300", "Иглопробивной геотекстиль 300"],
+      quantityType: "m2",
+      quantityOverride: roofStatementQuantities.geotextile300M2 > 0
+        ? {
+          value: roofStatementQuantities.geotextile300M2,
+          unit: "m2",
+          source: "Количество геотекстиля взято из ведомости материалов кровли.",
+        }
+        : undefined,
+      note: "Геотекстиль найден в ведомости материалов кровли; перед КП сверить, относится ли он к типу кровли К4/козырьки или к основному пирогу.",
     },
     ...plastfoilLayers,
     {
@@ -664,6 +781,40 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       note: "Доборные элементы считать по узлам и длинам примыканий; замену оцинкованного Г-профиля на ПВХ-металл согласовать по узлам.",
     },
     {
+      key: "logicpir_prof_statement_40",
+      role: "теплоизоляция LOGICPIR",
+      label: "LOGICPIR PROF Ф/Ф 40 мм",
+      detected: roofStatementQuantities.logicpirProfM2 > 0,
+      searchTerms: ["LOGICPIR PROF Ф/Ф 40", "LOGICPIR PROF 40", "LOGICPIR PROF Ф/Ф"],
+      thicknessMm: 40,
+      quantityType: "m2",
+      quantityOverride: roofStatementQuantities.logicpirProfM2 > 0
+        ? {
+          value: roofStatementQuantities.logicpirProfM2,
+          unit: "m2",
+          source: "Количество LOGICPIR PROF взято из ведомости материалов кровли.",
+        }
+        : undefined,
+      note: "Количество LOGICPIR PROF взято из ведомости материалов кровли; перед КП сверить, что все типы кровли допускают одну позицию LOGICPIR PROF Ф/Ф 40 мм.",
+    },
+    {
+      key: "carbon_prof_slope_statement",
+      role: "уклонообразующий слой CARBON PROF SLOPE",
+      label: "ТЕХНОНИКОЛЬ CARBON PROF SLOPE",
+      detected: roofStatementQuantities.carbonProfSlopeM3 > 0,
+      searchTerms: ["CARBON PROF SLOPE", "ТЕХНОНИКОЛЬ CARBON PROF SLOPE", "CARBON PROF"],
+      quantityType: "m3",
+      reviewOnly: true,
+      quantityOverride: roofStatementQuantities.carbonProfSlopeM3 > 0
+        ? {
+          value: roofStatementQuantities.carbonProfSlopeM3,
+          unit: "m3",
+          source: "Объем CARBON PROF SLOPE взят из ведомости материалов кровли.",
+        }
+        : undefined,
+      note: "Ведомость дает объем уклонообразующего слоя; в счет ставить после сверки раскладки клиновидных элементов/марок SLOPE.",
+    },
+    {
       key: "logicpir_prof_ff_40_double",
       role: "теплоизоляция по Ж/Б, LOGICPIR",
       label: "LOGICPIR PROF Ф/Ф 40 мм, 2 слоя",
@@ -687,7 +838,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       quantityType: "m3",
       note: "Слой относится к типу кровли по профлисту; площадь взята из спецификации кровельного покрытия.",
     },
-    ...roofWoolLayers,
+    ...roofWoolLayersWithStatementQuantities,
     {
       key: "technoruf_n_prof_100_spec",
       role: "теплоизоляция по профлисту, каменная вата",
@@ -730,6 +881,13 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
             : ["ТЕХНОБАРЬЕР", "Паробарьер С", "Паробарьер C", "Паробарьер"],
       factor: 1.12,
       areaOverride: mainPvcMembraneArea,
+      quantityOverride: roofStatementQuantities.parobarrierCa500M2 > 0
+        ? {
+          value: roofStatementQuantities.parobarrierCa500M2,
+          unit: "m2",
+          source: "Количество Паробарьер СА500 взято из ведомости материалов кровли.",
+        }
+        : undefined,
       quantityType: "m2",
       note: hasParobarrierCa500
         ? "В проекте найден Паробарьер СА500; количество посчитано по основной площади ПВХ-мембраны, перед КП сверить по узлам и нахлестам."
@@ -815,7 +973,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       key: "xps",
       role: "теплоизоляция",
       label: xpsThicknessMm ? `${hasCarbonProf ? "CARBON PROF" : "XPS"} ${xpsThicknessMm} мм` : hasCarbonProf ? "CARBON PROF" : "XPS",
-      detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i, /carbon\s+prof/i]),
+      detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i]) || (hasPlainCarbonProf && !hasCarbonProfSlope),
       searchTerms: xpsThicknessMm
         ? hasCarbonProf
           ? [`CARBON PROF ${xpsThicknessMm}`, `ТЕХНОНИКОЛЬ CARBON PROF ${xpsThicknessMm}`, `CARBON PROF`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
@@ -1423,6 +1581,7 @@ function mergeDetectedLayers(baseLayers: DetectedLayer[], aiLayers: DetectedLaye
       searchTerms: existing.searchTerms.length ? existing.searchTerms : aiLayer.searchTerms,
       thicknessMm: existing.thicknessMm ?? aiLayer.thicknessMm,
       areaOverride: existing.areaOverride ?? aiLayer.areaOverride,
+      quantityOverride: existing.quantityOverride ?? aiLayer.quantityOverride,
       unitCount: existing.unitCount ?? aiLayer.unitCount,
       note: existing.note ?? aiLayer.note,
     });
@@ -1433,10 +1592,9 @@ function mergeDetectedLayers(baseLayers: DetectedLayer[], aiLayers: DetectedLaye
 function mainRoofMembraneAreaFromLayers(layers: DetectedLayer[]) {
   const mainMembrane = layers.find((layer) =>
     ["pvc_logicroof_vrp", "pvc_plastfoil_classic"].includes(layer.key) &&
-    layer.areaOverride &&
-    layer.areaOverride > 0
+    ((layer.areaOverride && layer.areaOverride > 0) || (layer.quantityOverride?.unit === "m2" && layer.quantityOverride.value > 0))
   );
-  return mainMembrane?.areaOverride ?? null;
+  return mainMembrane?.areaOverride ?? mainMembrane?.quantityOverride?.value ?? null;
 }
 
 function buildRoofFastenerGuidance(text: string, question: string) {
@@ -1555,6 +1713,10 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.startsWith("logicpir_prof") && /ф\/ф|f\/f/i.test(item.name ?? "")) score += 8;
   if (layer.key.includes("_40") && /40\b|40\s*мм/i.test(item.name ?? "")) score += 10;
   if (layer.key.includes("_70") && /70\b|70\s*мм/i.test(item.name ?? "")) score += 10;
+  if (layer.key === "carbon_prof_slope_statement" && /carbon\s+prof\s+slope|карбон\s+проф\s+slope/i.test(item.name ?? "")) score += 28;
+  if (layer.key === "carbon_prof_slope_statement" && !/slope|клин/i.test(item.name ?? "")) score -= 16;
+  if (layer.key === "geotextile_tn_300_statement" && /геотекстил/i.test(item.name ?? "")) score += 18;
+  if (layer.key === "geotextile_tn_300_statement" && /300/i.test(item.name ?? "")) score += 12;
   if (layer.key === "technobarrier" && /технобарьер|паробарьер/i.test(item.name ?? "")) score += 14;
   if (layer.key === "technobarrier" && /[сc][аa]\s*500/i.test(requested) && /[сc][аa]\s*500/i.test(name)) score += 20;
   if (layer.key === "technobarrier" && /[сc][аa]\s*500/i.test(requested) && /технобарьер/i.test(name)) score -= 10;
@@ -1702,6 +1864,16 @@ function parseRollArea(name: string | null) {
   return null;
 }
 
+function parsePackageArea(name: string | null) {
+  if (!name || !/уп|упак|плит/i.test(name)) return null;
+  const matches = Array.from(name.matchAll(/(\d+(?:[,.]\d+)?)\s*(?:м2|м²)(?!\s*\/\s*под)/gi));
+  if (!matches.length) return null;
+  const last = matches[matches.length - 1]?.[1];
+  if (!last) return null;
+  const value = toNumber(last);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function parsePackageVolume(name: string | null) {
   if (!name) return null;
   const packageMatch = name.match(/(\d+(?:[,.]\d+)?)\s*(?:м3|м³)\s*\/\s*(?:уп|упак|упаков)/i);
@@ -1736,6 +1908,37 @@ function parseBoardThicknessMm(name: string | null) {
 }
 
 function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureItem | null) {
+  if (layer.quantityOverride) {
+    const qty = layer.quantityOverride.value;
+    if (layer.quantityOverride.unit === "шт") {
+      return {
+        value: qty,
+        text: `${round(qty, 2)} шт по ведомости проекта`,
+      };
+    }
+
+    if (layer.quantityOverride.unit === "m2") {
+      const packageArea = parsePackageArea(item?.name ?? null);
+      const rollArea = packageArea === null ? parseRollArea(item?.name ?? null) : null;
+      return {
+        value: round(qty, 2),
+        text: packageArea !== null
+          ? `${round(qty, 2)} м2 по ведомости проекта, ориентир ${Math.ceil(qty / packageArea)} уп. по ${round(packageArea, 4)} м2`
+          : rollArea !== null
+            ? `${round(qty, 2)} м2 по ведомости проекта, ориентир ${Math.ceil(qty / rollArea)} рул. по ${round(rollArea, 2)} м2`
+            : `${round(qty, 2)} м2 по ведомости проекта`,
+      };
+    }
+
+    const packageVolume = parsePackageVolume(item?.name ?? null);
+    return {
+      value: round(qty, 3),
+      text: packageVolume !== null
+        ? `${round(qty, 3)} м3 по ведомости проекта, ориентир ${Math.ceil(qty / packageVolume)} уп. по ${round(packageVolume, 4)} м3`
+        : `${round(qty, 3)} м3 по ведомости проекта`,
+    };
+  }
+
   if (layer.quantityType === "project") {
     return {
       value: layer.unitCount ?? null,
@@ -2536,6 +2739,7 @@ export async function POST(request: NextRequest) {
       material: layer.label,
       quantityType: layer.quantityType,
       areaOverride: layer.areaOverride ?? null,
+      quantityOverride: layer.quantityOverride ?? null,
       unitCount: layer.unitCount ?? null,
       note: layer.note ?? null,
     }));
