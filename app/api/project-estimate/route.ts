@@ -664,7 +664,6 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const hasParobarrierCa500 = /паробарьер\s*[сc][аa]\s*500|[сc][аa]\s*500/i.test(lower);
   const hasParobarrierC = /паробарьер\s*[сc](?![аa]\s*500)/i.test(lower);
   const hasTechnobarrier = /технобарьер/i.test(lower);
-  const hasSegmentedVaporBarrierConflict = hasSegmentedRoofSpec && hasTechnobarrier && (hasParobarrierC || hasParobarrierCa500);
   const hasExactHydrowindMembrane =
     /альфа\s+(?:вент|топ)|мастер\s+вент|georex|гидро-?ветрозащитн[\s\S]{0,80}технониколь|технониколь[\s\S]{0,80}гидро-?ветрозащитн/i.test(lower);
   const hasExternalRoofDrainage = includesAny(lower, [
@@ -902,7 +901,6 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
             : ["ТЕХНОБАРЬЕР", "Паробарьер С", "Паробарьер C", "Паробарьер"],
       factor: 1.12,
       areaOverride: mainPvcMembraneArea,
-      reviewOnly: hasSegmentedVaporBarrierConflict,
       quantityOverride: roofStatementQuantities.parobarrierCa500M2 > 0
         ? {
           value: roofStatementQuantities.parobarrierCa500M2,
@@ -913,8 +911,6 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       quantityType: "m2",
       note: hasParobarrierCa500
         ? "В проекте найден Паробарьер СА500; количество посчитано по основной площади ПВХ-мембраны, перед КП сверить по узлам и нахлестам."
-        : hasSegmentedVaporBarrierConflict
-          ? "В проекте одновременно встречаются ТЕХНОБАРЬЕР и Паробарьер для разных типов кровли; не ставить одной строкой на всю площадь, пока не разделены участки по Ж/Б и профлисту."
         : hasParobarrierC && !hasTechnobarrier
           ? "В проекте найден Паробарьер C; перед КП сверить точную модификацию и ширину рулона."
           : hasTechnobarrier && !hasParobarrierC
