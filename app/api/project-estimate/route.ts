@@ -232,8 +232,10 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
     };
   }
 
-  const axesContext = text.match(/(?:размер(?:ы|ами)|осях|в\s+осях)[\s\S]{0,220}/i)?.[0] ?? "";
-  const axesDimensionMatches = Array.from(axesContext.matchAll(/(\d{2,4}(?:[,.]\d+)?)\s*[xхХ*]\s*(\d{2,4}(?:[,.]\d+)?)\s*м/gi));
+  const axesContexts = Array.from(text.matchAll(/(?:размер(?:ы|ами)|осях|в\s+осях)[\s\S]{0,220}/gi)).map((match) => match[0]);
+  const axesDimensionMatches = axesContexts.flatMap((context) =>
+    Array.from(context.matchAll(/(\d{2,4}(?:[,.]\d+)?)\s*[xхХ*]\s*(\d{2,4}(?:[,.]\d+)?)\s*м/gi))
+  );
   for (const match of axesDimensionMatches) {
     const first = match[1] ? toNumber(match[1]) : NaN;
     const second = match[2] ? toNumber(match[2]) : NaN;
