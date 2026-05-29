@@ -1349,14 +1349,14 @@ export async function GET(request: NextRequest) {
       nomQuery = nomQuery.ilike('name', '%геотекст%')
     }
 
-    const isAccessoryQuery = /отвод|заглуш|пробк|тройник|переход|сегмент|колено/i.test(rawQuery)
+    const isAccessoryQuery = /отвод|заглуш|пробк|тройник|переход|сегмент|колено|l[-\s]*(?:30|45|90)/i.test(rawQuery)
     const isImplicitXotpipeCylinderQuery =
       /xotpipe|хотпайп/i.test(rawQuery) &&
       /\bsp\b/i.test(rawQuery) &&
       requestedSizeNumbers.length >= 2 &&
       !isAccessoryQuery
     const isCylinderQuery = hasCylinderQueryForNomenclature || isImplicitXotpipeCylinderQuery
-    if (isCylinderQuery) {
+    if (isCylinderQuery && !isAccessoryQuery) {
       nomQuery = nomQuery.ilike('name', '%цилиндр%')
     }
 
@@ -2723,7 +2723,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Если очищенная 1С-номенклатура уже дала точные позиции, старый products не добавляем в контекст.
-  if (hasCylinderQueryForNomenclature && !/отвод|заглуш|пробк|тройник|переход|сегмент|колено/i.test(rawQuery)) {
+  if (hasCylinderQueryForNomenclature && !/отвод|заглуш|пробк|тройник|переход|сегмент|колено|l[-\s]*(?:30|45|90)/i.test(rawQuery)) {
     const primaryCylinderItems = relevant_nomenclature.filter((item) => isPrimaryCylinderNomenclature(item.name))
     const displacedCylinderAccessories = relevant_nomenclature.filter((item) => !isPrimaryCylinderNomenclature(item.name))
 
