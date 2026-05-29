@@ -368,7 +368,9 @@ function extractQuantitiesAfterMaterial(statementText: string, materialPattern: 
     if (!quantityMatch?.[1]) continue;
     const value = toNumber(quantityMatch[1]);
     if (!Number.isFinite(value) || value <= 0) continue;
-    if (!hasStatementContext && value < 500) continue;
+    if (unit === "m2" && value < 10) continue;
+    if (!hasStatementContext && unit === "m2" && value < 500) continue;
+    if (!hasStatementContext && unit === "m3" && !/кровельн[а-я\s-]*пвх|logicpir|паробарьер|м2|сто/i.test(before)) continue;
     result.push(value);
   }
 
