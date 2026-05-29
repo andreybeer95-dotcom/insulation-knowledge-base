@@ -88,6 +88,14 @@ type AnalogRecommendation = {
   note: string;
 };
 
+type RoofBreakdownSection = {
+  title: string;
+  areaM2: number;
+  basis: string;
+  layers: string[];
+  note?: string;
+};
+
 let localNomenclatureCache: NomenclatureItem[] | null = null;
 
 type AreaInfo = {
@@ -206,6 +214,64 @@ function extractRoofSpecAreas(text: string) {
     membraneTotalArea: round(membraneOnConcreteArea + membraneOnProfiledSheetArea, 2),
     sandwichRoofArea: round(sandwichRoofArea, 2),
   };
+}
+
+function buildRoofBreakdown(text: string): RoofBreakdownSection[] {
+  const lower = text.toLowerCase();
+  const roofSpecAreas = extractRoofSpecAreas(lower);
+  const sections: RoofBreakdownSection[] = [];
+  const hasLogicpirSlope = /logicpir\s+slope/i.test(lower);
+  const hasParobarrierCa500 = /паробарьер\s*[сc][аa]\s*500|[сc][аa]\s*500/i.test(lower);
+  const hasParobarrierC = /паробарьер\s*[сc](?![аa]\s*500)/i.test(lower);
+
+  if (roofSpecAreas.membraneOnConcreteArea > 0) {
+    sections.push({
+      title: "Мембранная кровля по Ж/Б основанию",
+      areaM2: roofSpecAreas.membraneOnConcreteArea,
+      basis: "монолитное железобетонное основание; площадь взята из спецификации кровельного покрытия",
+      layers: [
+        "LOGICROOF V-RP — кровельный ковер",
+        "LOGICPIR PROF Ф/Ф 40 мм — теплоизоляция, 2 слоя",
+        "ТЕХНОБАРЬЕР — пароизоляция",
+        ...(hasLogicpirSlope ? ["LOGICPIR SLOPE — уклонообразующий слой, считать только по плану уклонов"] : []),
+      ],
+      note: "Считать как отдельный тип кровли; не смешивать с участком по профлисту и сэндвич-панелями.",
+    });
+  }
+
+  if (roofSpecAreas.membraneOnProfiledSheetArea > 0) {
+    const vaporLayer = hasParobarrierCa500
+      ? "Паробарьер СА500 — пароизоляция"
+      : hasParobarrierC
+        ? "Паробарьер C — пароизоляция"
+        : "пароизоляция — сверить марку по проекту";
+
+    sections.push({
+      title: "Мембранная кровля по профлисту",
+      areaM2: roofSpecAreas.membraneOnProfiledSheetArea,
+      basis: "профилированный лист; площадь взята из спецификации кровельного покрытия",
+      layers: [
+        "LOGICROOF V-RP — кровельный ковер",
+        "LOGICPIR PROF Ф/Ф 70 мм — теплоизоляция",
+        "ТЕХНОРУФ Н ПРОФ 100 мм — нижний слой теплоизоляции",
+        vaporLayer,
+        "профлист — основание, в счет кровельных материалов не ставить без отдельной ведомости КМ/КМД",
+      ],
+      note: "Считать отдельно от Ж/Б участка; крепеж и узлы проверять по основанию и ветровому расчету.",
+    });
+  }
+
+  if (roofSpecAreas.sandwichRoofArea > 0) {
+    sections.push({
+      title: "Кровля из сэндвич-панелей",
+      areaM2: roofSpecAreas.sandwichRoofArea,
+      basis: "отдельный тип кровельного покрытия из спецификации",
+      layers: ["кровельные сэндвич-панели 100 мм — отдельная система/номенклатура"],
+      note: "Не включать в мембранную кровлю; считать отдельной ведомостью после подбора производителя, толщины и кода 1С.",
+    });
+  }
+
+  return sections;
 }
 
 function errorMessage(error: unknown) {
@@ -2549,6 +2615,7 @@ function buildQuoteDraft(summary: {
   quoteItems: QuoteItem[];
   invoiceItems: InvoiceItem[];
   analogRecommendations: AnalogRecommendation[];
+  roofBreakdown?: RoofBreakdownSection[];
   roofFastenerGuidance?: ReturnType<typeof buildRoofFastenerGuidance>;
   notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
@@ -2581,6 +2648,18 @@ function buildQuoteDraft(summary: {
     const systemRoleLines = buildProjectSystemRoleLines(summary.systemContext);
     if (systemRoleLines.length) {
       lines.push(...systemRoleLines);
+    }
+    lines.push("");
+  }
+
+  if (summary.roofBreakdown?.length) {
+    lines.push("Разбор кровли по проекту:");
+    for (const section of summary.roofBreakdown) {
+      lines.push(`- ${section.title}: ${section.areaM2} м2; основание: ${section.basis}.`);
+      lines.push(`  Слои: ${section.layers.join("; ")}.`);
+      if (section.note) {
+        lines.push(`  Примечание: ${section.note}`);
+      }
     }
     lines.push("");
   }
@@ -2810,6 +2889,7 @@ export async function POST(request: NextRequest) {
         rules: await loadProjectSystemRules(detectedProjectSystem),
       }
       : null;
+    const roofBreakdown = buildRoofBreakdown(extractedText);
     const projectQuery = buildProjectQuery({ direction, question, area, layers, systemContext: projectSystem });
 
     const invoiceItems: InvoiceItem[] = [];
@@ -2902,6 +2982,7 @@ export async function POST(request: NextRequest) {
       quoteItems,
       invoiceItems,
       analogRecommendations,
+      roofBreakdown,
       roofFastenerGuidance,
       notFound,
       projectOnly,
@@ -2929,6 +3010,7 @@ export async function POST(request: NextRequest) {
       invoice_items: invoiceItems,
       quote_items: quoteItems,
       quote_draft: quoteDraft,
+      roof_breakdown: roofBreakdown,
       analog_recommendations: analogRecommendations,
       project_only: projectOnly,
       not_found: notFound,
@@ -2952,6 +3034,7 @@ export async function POST(request: NextRequest) {
       quoteItems,
       analogRecommendations,
       quoteDraft,
+      roofBreakdown,
       projectSystem: isFullResponse ? projectSystem : compactProjectSystem(projectSystem),
       projectOnly,
       notFound,
