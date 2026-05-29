@@ -487,6 +487,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const hasLogicroofVrpFr = /logicroof\s+v[-\s]*rp\s*fr/i.test(lower);
+  const hasCarbonProf = /carbon\s+prof|карбон\s+проф/i.test(lower);
   const roofWoolLayers = detectRoofWoolLayers(lower);
   const plastfoilLayers = detectPlastfoilLayers(lower);
   const mainPvcMembraneArea = plastfoilLayers.find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride
@@ -751,11 +752,15 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     {
       key: "xps",
       role: "теплоизоляция",
-      label: xpsThicknessMm ? `XPS ${xpsThicknessMm} мм` : "XPS",
+      label: xpsThicknessMm ? `${hasCarbonProf ? "CARBON PROF" : "XPS"} ${xpsThicknessMm} мм` : hasCarbonProf ? "CARBON PROF" : "XPS",
       detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i, /carbon\s+prof/i]),
       searchTerms: xpsThicknessMm
-        ? [`CARBON ECO ${xpsThicknessMm}`, `CARBON PROF ${xpsThicknessMm}`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
-        : ["CARBON ECO", "CARBON PROF", "XPS", "ЭППС"],
+        ? hasCarbonProf
+          ? [`CARBON PROF ${xpsThicknessMm}`, `ТЕХНОНИКОЛЬ CARBON PROF ${xpsThicknessMm}`, `CARBON PROF`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
+          : [`CARBON ECO ${xpsThicknessMm}`, `CARBON PROF ${xpsThicknessMm}`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
+        : hasCarbonProf
+          ? ["CARBON PROF", "ТЕХНОНИКОЛЬ CARBON PROF", "XPS", "ЭППС"]
+          : ["CARBON ECO", "CARBON PROF", "XPS", "ЭППС"],
       factor: 1.03,
       thicknessMm: xpsThicknessMm,
       quantityType: xpsThicknessMm ? "m3" : "m2",
@@ -1349,6 +1354,15 @@ function mergeDetectedLayers(baseLayers: DetectedLayer[], aiLayers: DetectedLaye
   return Array.from(merged.values());
 }
 
+function mainRoofMembraneAreaFromLayers(layers: DetectedLayer[]) {
+  const mainMembrane = layers.find((layer) =>
+    ["pvc_logicroof_vrp", "pvc_plastfoil_classic"].includes(layer.key) &&
+    layer.areaOverride &&
+    layer.areaOverride > 0
+  );
+  return mainMembrane?.areaOverride ?? null;
+}
+
 function buildRoofFastenerGuidance(text: string, question: string) {
   const signalText = `${text} ${question}`.toLowerCase();
   const asksAboutFasteners = /креп[её]ж|саморез|телескоп|termoclip|термоклип|анкер/i.test(signalText);
@@ -1450,8 +1464,13 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.startsWith("pvc_plastfoil_art") && /1[,.]5/i.test(item.name ?? "")) score += 18;
   if (layer.key.startsWith("pvc_plastfoil_art") && /40\s*м2|2000\s*[xх*]\s*20000/i.test(item.name ?? "")) score += 5;
   if (layer.key.startsWith("pvc_plastfoil_art") && /classic|eco|geo|polar|light|lay/i.test(item.name ?? "")) score -= 12;
-  if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
-  if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
+  if (layer.key === "xps" && /carbon\s+prof/i.test(requested)) {
+    if (/carbon\s+prof/i.test(item.name ?? "")) score += 24;
+    if (/carbon\s+eco/i.test(item.name ?? "")) score -= 20;
+  } else {
+    if (layer.key === "xps" && /carbon eco/i.test(item.name ?? "")) score += 7;
+    if (layer.key === "xps" && /carbon prof/i.test(item.name ?? "")) score += 5;
+  }
   if (layer.key.startsWith("logicpir_prof") && /logicpir/i.test(item.name ?? "") && /prof/i.test(item.name ?? "")) score += 16;
   if (layer.key.startsWith("logicpir_prof") && /ф\/ф|f\/f/i.test(item.name ?? "")) score += 8;
   if (layer.key.includes("_40") && /40\b|40\s*мм/i.test(item.name ?? "")) score += 10;
@@ -2284,6 +2303,20 @@ export async function POST(request: NextRequest) {
             : `Площадь кровли извлечена AI-экстрактором из PDF. ${aiAreaSource || "Перед счетом сверить с ведомостью/планом кровли."}`,
         };
       }
+    }
+
+    const mainMembraneArea = mainRoofMembraneAreaFromLayers(layers);
+    if (
+      mainMembraneArea &&
+      mainMembraneArea > 0 &&
+      (area.source === "not_found" || area.source === "axes_estimate" || area.confidence === "low")
+    ) {
+      area = {
+        value: round(mainMembraneArea, 2),
+        source: "pdf_text",
+        confidence: "medium",
+        note: "Площадь кровли взята из площади основной ПВХ-мембраны в спецификации проекта как запасной источник. Для финального КП сверить с ведомостью/планом кровли.",
+      };
     }
 
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
