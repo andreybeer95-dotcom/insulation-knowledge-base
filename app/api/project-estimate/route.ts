@@ -364,7 +364,7 @@ function extractQuantitiesAfterMaterial(statementText: string, materialPattern: 
     const before = statementText.slice(Math.max(0, index - 550), index);
     const after = statementText.slice(index, index + 420);
     const hasStatementContext = /ведомость\s+материалов\s+кровли|обозначение\s+наименование\s+толщина|(?:^|\s)к\d(?:[.,]\d)?\s*$|(?:^|\s)к\d(?:[.,]\d)?\s+сто/i.test(before);
-    const quantityMatch = after.match(new RegExp(String.raw`(\d{1,6}(?:[,.]\d{1,4})?)\s*(?:${unitPattern})`, "i"));
+    const quantityMatch = after.match(new RegExp(String.raw`(?:^|[^\d,.])(\d{1,6}(?:[,.]\d{1,2})?)\s*(?:${unitPattern})`, "i"));
     if (!quantityMatch?.[1]) continue;
     const value = toNumber(quantityMatch[1]);
     if (!Number.isFinite(value) || value <= 0) continue;
@@ -714,6 +714,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       detected: roofStatementQuantities.geotextile300M2 > 0,
       searchTerms: ["Геотекстиль ТЕХНОНИКОЛЬ 300", "Геотекстиль 300", "Иглопробивной геотекстиль 300"],
       quantityType: "m2",
+      reviewOnly: true,
       quantityOverride: roofStatementQuantities.geotextile300M2 > 0
         ? {
           value: roofStatementQuantities.geotextile300M2,
@@ -973,7 +974,9 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       key: "xps",
       role: "теплоизоляция",
       label: xpsThicknessMm ? `${hasCarbonProf ? "CARBON PROF" : "XPS"} ${xpsThicknessMm} мм` : hasCarbonProf ? "CARBON PROF" : "XPS",
-      detected: includesAny(lower, [/xps/i, /эппс/i, /экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i]) || (hasPlainCarbonProf && !hasCarbonProfSlope),
+      detected: includesAny(lower, [/xps/i, /эппс/i]) ||
+        (roofStatementQuantities.carbonProfSlopeM3 <= 0 && includesAny(lower, [/экструдированн[а-я\s-]*пенополистирол/i, /экструзионн[а-я\s-]*пенополистирол/i])) ||
+        (hasPlainCarbonProf && !hasCarbonProfSlope),
       searchTerms: xpsThicknessMm
         ? hasCarbonProf
           ? [`CARBON PROF ${xpsThicknessMm}`, `ТЕХНОНИКОЛЬ CARBON PROF ${xpsThicknessMm}`, `CARBON PROF`, `XPS ${xpsThicknessMm}`, `ЭППС ${xpsThicknessMm}`]
@@ -1728,6 +1731,11 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
   if (layer.key.includes("_оптима_") && /(?:в|н)\s*оптима/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_в60_") && /в\s*60|в60/i.test(item.name ?? "")) score += 14;
   if (layer.key.includes("_н30_") && /н\s*30|н30|h30/i.test(item.name ?? "")) score += 14;
+  if (layer.key.startsWith("technoruf_") && layer.thicknessMm) {
+    const itemThickness = parseBoardThicknessMm(item.name);
+    if (itemThickness === layer.thicknessMm) score += 45;
+    else if (itemThickness !== null) score -= 60;
+  }
   if (layer.key === "dirock_ruf_n_60" && /dirock|технор[уо]ф\s+н\s+проф/i.test(item.name ?? "")) score += 16;
   if (layer.key === "dirock_ruf_n_60" && /1200[хx*]600[хx*]60\b|[хx*]60(?:\s*мм|\b)|\b60\s*мм/i.test(item.name ?? "")) score += 54;
   if (layer.key === "dirock_ruf_n_60" && !/[хx*]60(?:\s*мм|\b)|\b60\s*мм/i.test(item.name ?? "")) score -= 40;
