@@ -2082,6 +2082,25 @@ function buildProjectQuery(summary: {
     .join(". ");
 }
 
+function compactProjectSystem(systemContext: ProjectSystemContext | null) {
+  if (!systemContext) return null;
+  return {
+    id: systemContext.id,
+    name: systemContext.name,
+    source: systemContext.source,
+    confidence: systemContext.confidence,
+    reason: systemContext.reason,
+    navAnalogId: systemContext.navAnalogId ?? null,
+    navAnalogName: systemContext.navAnalogName ?? null,
+    warning: systemContext.warning ?? null,
+    rulesCount: systemContext.rules.length,
+    ruleNames: systemContext.rules
+      .map((rule) => rule.rule_name)
+      .filter(Boolean)
+      .slice(0, 8),
+  };
+}
+
 function extractQuoteQuantity(calculation: string) {
   const orientMatch = calculation.match(/ориентир\s+(\d+(?:[,.]\d+)?)\s*(рул|уп|меш|шт)\.?/i);
   if (orientMatch?.[1] && orientMatch?.[2]) {
@@ -2318,6 +2337,14 @@ export async function POST(request: NextRequest) {
     const direction = String(form.get("direction") || "кровля");
     const question = String(form.get("question") || "");
     const manualArea = form.get("area") ? String(form.get("area")) : null;
+    const responseMode = String(
+      form.get("responseMode") ||
+      form.get("compact") ||
+      request.nextUrl.searchParams.get("responseMode") ||
+      request.nextUrl.searchParams.get("compact") ||
+      "compact"
+    ).toLowerCase();
+    const isFullResponse = responseMode === "full" || responseMode === "0" || responseMode === "false";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "PDF file is required" }, { status: 400 });
@@ -2543,12 +2570,12 @@ export async function POST(request: NextRequest) {
       quoteItems,
       analogRecommendations,
       quoteDraft,
-      projectSystem,
+      projectSystem: isFullResponse ? projectSystem : compactProjectSystem(projectSystem),
       projectOnly,
       notFound,
       roofFastenerGuidance,
       roofDrainGuidance,
-      textPreview: extractedText.slice(0, 1800),
+      textPreview: isFullResponse ? extractedText.slice(0, 1800) : undefined,
     });
   } catch (error) {
     const message = errorMessage(error);

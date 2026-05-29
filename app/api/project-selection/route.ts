@@ -53,8 +53,25 @@ function buildCompactSummary(estimate: any) {
 
 function sanitizeEstimateForSelection(estimate: any) {
   if (!estimate || typeof estimate !== "object") return estimate;
-  const { textPreview: _textPreview, ...rest } = estimate;
-  return rest;
+  const { textPreview: _textPreview, projectSystem, ...rest } = estimate;
+  const compactSystem = projectSystem && typeof projectSystem === "object"
+    ? {
+      id: projectSystem.id ?? null,
+      name: projectSystem.name ?? null,
+      source: projectSystem.source ?? null,
+      confidence: projectSystem.confidence ?? null,
+      reason: projectSystem.reason ?? null,
+      navAnalogName: projectSystem.navAnalogName ?? null,
+      warning: projectSystem.warning ?? null,
+      rulesCount: Array.isArray(projectSystem.rules) ? projectSystem.rules.length : projectSystem.rulesCount ?? 0,
+      ruleNames: Array.isArray(projectSystem.ruleNames)
+        ? projectSystem.ruleNames.slice(0, 8)
+        : Array.isArray(projectSystem.rules)
+          ? projectSystem.rules.map((rule: any) => rule?.rule_name).filter(Boolean).slice(0, 8)
+          : [],
+    }
+    : projectSystem;
+  return { ...rest, projectSystem: compactSystem };
 }
 
 export async function POST(request: NextRequest) {

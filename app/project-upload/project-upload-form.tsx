@@ -88,6 +88,8 @@ function sourceLabel(source?: string) {
       return "найдена в PDF";
     case "axes_estimate":
       return "оценка по осям";
+    case "roof_plan_estimate":
+      return "оценка по плану кровли";
     default:
       return "не найдена";
   }
@@ -135,6 +137,7 @@ export default function ProjectUploadForm() {
     body.append("file", file);
     body.append("direction", direction);
     body.append("question", question);
+    body.append("responseMode", "compact");
     if (area.trim()) body.append("area", area.trim());
 
     try {
