@@ -301,6 +301,18 @@ export async function GET(request: NextRequest) {
     .filter(w => w.length > 3 && !STOP_WORDS.includes(w))
 
   const extractExplicitSizeNumbers = (text: string) => {
+    const slashSizeMatch = text.match(/(?:^|[^\d])(\d{2,4})\s*\/\s*(\d{1,4})(?=$|[^\d])/i)
+    if (
+      slashSizeMatch &&
+      /цилиндр|скорлуп|отвод|xotpipe|хотпайп|sp[-\s]*\d+|кф\s*1|кв[-\s]*\d|rwl/i.test(text)
+    ) {
+      const first = Number(slashSizeMatch[1])
+      const second = Number(slashSizeMatch[2])
+      if (first <= 1220 && second <= 300) {
+        return [slashSizeMatch[1], slashSizeMatch[2]]
+      }
+    }
+
     const matches = Array.from(text.matchAll(/(\d{2,4})\s*[xх*]\s*(\d{1,4})(?:\s*[xх*]\s*(\d{1,4}))?/gi))
     let best: { numbers: string[]; score: number } | null = null
 
@@ -399,6 +411,8 @@ export async function GET(request: NextRequest) {
     /\bosb\b|осп|ориентированно[-\s]*стружечн/i.test(rawQuery)
   const hasProfileSheetDirectQuery =
     /профлист|профнастил|профилированн\w*\s+лист/i.test(rawQuery)
+  const requestedProfileMark =
+    rawQuery.match(/(?:^|[^a-zа-яё0-9])(?:н|h)\s*[-–—]?\s*(\d{2,3})(?=$|[^a-zа-яё0-9])/i)?.[1] ?? null
   const hasCpsDirectQuery =
     /цпс|пескобетон|цементно[-\s]*песчан|м[-\s]*300|м300/i.test(rawQuery)
   const hasKeramzitDirectQuery =
@@ -623,6 +637,35 @@ export async function GET(request: NextRequest) {
     /воронк|geberit|pluvia|геберит|плювиа|vortex|wigar|вфо/i.test(name || '') &&
     !/насадк|снег|мостик|огражден|пароизоляц|мембран(?!.*воронк)/i.test(name || '')
 
+  const isProfileSheetNomenclature = (name?: string | null) =>
+    /профлист|профнастил|профилированн\w*\s+лист/i.test(name || '') &&
+    !/саморез|креп[её]ж|лента|планк/i.test(name || '')
+
+  const hasProfileMark = (name: string | null | undefined, mark: string) => {
+    const pattern = new RegExp(`(?:^|[^a-zа-яё0-9])(?:н|h)\\s*[-–—]?\\s*${mark}(?=$|[^a-zа-яё0-9])`, 'i')
+    return pattern.test(name || '')
+  }
+
+  const sortProfileSheetNomenclature = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
+    const score = (item: NomenclatureItem) => {
+      const text = `${item.article || ''} ${item.name || ''}`.toLowerCase()
+      let value = item.code ? 10 : 0
+      if (isProfileSheetNomenclature(text)) value += 20
+      if (requestedProfileMark) {
+        if (hasProfileMark(text, requestedProfileMark)) value += 120
+        if (/(?:^|[^a-zа-яё0-9])(?:н|h)\s*[-–—]?\s*\d{2,3}(?=$|[^a-zа-яё0-9])/.test(text) && !hasProfileMark(text, requestedProfileMark)) value -= 80
+      }
+      for (const size of requestedSizeNumbers) {
+        if (hasStandaloneNumber(text, size)) value += 8
+      }
+      if (/оц|zn|цинк/i.test(rawQuery) && /оц|zn|цинк/i.test(text)) value += 6
+      return value
+    }
+    const scoreDiff = score(b) - score(a)
+    if (scoreDiff !== 0) return scoreDiff
+    return (a.name || '').localeCompare(b.name || '', 'ru')
+  })
+
   const sortRoofFunnelNomenclature = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
     const score = (item: NomenclatureItem) => {
       const text = `${item.brand || ''} ${item.name || ''}`.toLowerCase()
@@ -640,6 +683,27 @@ export async function GET(request: NextRequest) {
       if (/парапет/i.test(rawQuery) && /парапет/.test(text)) value += 28
       if (/ремонт/i.test(rawQuery) && /ремонт/.test(text)) value += 20
       if (/парапет|ремонт/.test(text) && /geberit|pluvia|геберит|плювиа/i.test(rawQuery)) value -= 12
+      return value
+    }
+    const scoreDiff = score(b) - score(a)
+    if (scoreDiff !== 0) return scoreDiff
+    return (a.name || '').localeCompare(b.name || '', 'ru')
+  })
+
+  const requestedLogicroofMastKind =
+    rawQuery.match(/mast[-\s]*(pu|prime|aks)/i)?.[1]?.toLowerCase() ?? null
+
+  const sortLogicroofMastNomenclature = (items: NomenclatureItem[]) => [...items].sort((a, b) => {
+    const score = (item: NomenclatureItem) => {
+      const text = `${item.article || ''} ${item.name || ''}`.toLowerCase()
+      let value = item.code ? 10 : 0
+      if (/logicroof\s+mast|mast[-\s]*(?:pu|prime|aks)/i.test(text)) value += 45
+      if (/logicroof\s+bond/i.test(text)) value -= requestedLogicroofMastKind ? 35 : 0
+      if (requestedLogicroofMastKind) {
+        const exact = new RegExp(`mast[-\\s]*${requestedLogicroofMastKind}`, 'i')
+        if (exact.test(text)) value += 160
+        if (/mast[-\s]*(?:pu|prime|aks)/i.test(text) && !exact.test(text)) value -= 25
+      }
       return value
     }
     const scoreDiff = score(b) - score(a)
@@ -1063,7 +1127,9 @@ export async function GET(request: NextRequest) {
 
   const addRequestedInvoiceArticles = (articles: Set<string>) => {
     const [firstSize, secondSize] = requestedSizeNumbers
-    const hasXotpipeSp100 = /xotpipe|хотпайп/i.test(rawQuery) && /\bsp[-\s]*100\b/i.test(rawQuery)
+    const hasXotpipe = /xotpipe|хотпайп/i.test(rawQuery)
+    const hasXotpipeSp100 = hasXotpipe && /\bsp[-\s]*100\b/i.test(rawQuery)
+    const hasXotpipeL90 = hasXotpipe && /l[-\s]*90|отвод\s*90/i.test(rawQuery)
     const hasExplicitXotpipeCoating =
       /alu|алю|фольг|негорюч|нг\s*фольг|me\b|o-me-zn|оцинк|кожух|outside|защитн/i.test(rawQuery)
 
@@ -1077,6 +1143,15 @@ export async function GET(request: NextRequest) {
       ) {
         articles.add(`SP100L90DT${firstSize}-${secondSize}`)
       }
+    }
+    if (
+      !hasXotpipeSp100 &&
+      hasXotpipeL90 &&
+      firstSize &&
+      secondSize &&
+      !hasExplicitXotpipeCoating
+    ) {
+      articles.add(`SP100L90DT${firstSize}-${secondSize}`)
     }
 
     for (const match of rawQuery.matchAll(/O-ME-ZN\s+(\d{2,4})\s*[xх*]\s*(\d{3,4})/gi)) {
@@ -1793,7 +1868,7 @@ export async function GET(request: NextRequest) {
         'ЦБ08834',
         'ЦБ06423',
       ] : []),
-      ...(hasProfileSheetDirectQuery ? [
+      ...(hasProfileSheetDirectQuery && (!requestedProfileMark || requestedProfileMark === '75') ? [
         'ЦВ000222904',
         'ЦБ17307',
         'ЦБ09360',
@@ -1839,6 +1914,35 @@ export async function GET(request: NextRequest) {
         ]).slice(0, 24)
         nomenclature_analogs = dedupeNomenclature([
           ...relevant_nomenclature.filter((item) => !directCommonIds.has(item.id)),
+          ...nomenclature_analogs,
+        ]).slice(0, 30)
+      }
+    }
+
+    if (hasProfileSheetDirectQuery) {
+      const { data: profileSheetData } = await supabase
+        .from('nomenclature_1c')
+        .select('id, code, article, name, brand')
+        .or('name.ilike.%Профлист%,name.ilike.%Профнастил%,name.ilike.%профлист%,name.ilike.%профнастил%,name.ilike.%профилированный лист%')
+        .limit(500)
+
+      const profileCandidates = ((profileSheetData ?? []) as NomenclatureItem[])
+        .filter((item) => isProfileSheetNomenclature(item.name))
+      const profileMarkCandidates = requestedProfileMark
+        ? profileCandidates.filter((item) => hasProfileMark(item.name, requestedProfileMark))
+        : profileCandidates
+      const profileItems = sortProfileSheetNomenclature(
+        dedupeNomenclature(profileMarkCandidates.length > 0 ? profileMarkCandidates : profileCandidates)
+      )
+
+      if (profileItems.length > 0) {
+        const profileIds = new Set(profileItems.map((item) => item.id))
+        relevant_nomenclature = dedupeNomenclature([
+          ...profileItems,
+          ...relevant_nomenclature,
+        ]).slice(0, 24)
+        nomenclature_analogs = dedupeNomenclature([
+          ...relevant_nomenclature.filter((item) => !profileIds.has(item.id)),
           ...nomenclature_analogs,
         ]).slice(0, 30)
       }
@@ -2015,15 +2119,16 @@ export async function GET(request: NextRequest) {
         .filter((item) => /logicroof\s+bond/i.test(item.name || ''))
       const mastItems = dedupeNomenclature((mastRes.data ?? []) as NomenclatureItem[])
         .filter((item) => /logicroof\s+mast|mast[-\s]*(?:pu|prime|aks)/i.test(item.name || ''))
+      const sortedMastItems = sortLogicroofMastNomenclature(mastItems)
       const primaryAccessoryItems = hasLogicroofMastDirectQuery
-        ? [...mastItems, ...bondItems]
+        ? [...sortedMastItems, ...bondItems]
         : bondItems
       relevant_nomenclature = dedupeNomenclature([
         ...primaryAccessoryItems,
         ...relevant_nomenclature,
       ]).slice(0, 20)
       nomenclature_accessories = dedupeNomenclature([
-        ...(hasLogicroofMastDirectQuery ? [] : mastItems),
+        ...(hasLogicroofMastDirectQuery ? [] : sortedMastItems),
         ...((pvcMetalRes.data ?? []) as NomenclatureItem[]),
         ...nomenclature_accessories,
       ]).slice(0, 20)
@@ -2154,6 +2259,12 @@ export async function GET(request: NextRequest) {
           ...invoiceAnalogCandidates,
           ...nomenclature_analogs,
         ]).slice(0, 40)
+      }
+      if (requested_invoice_items.length > 0) {
+        relevant_nomenclature = dedupeNomenclature([
+          ...requested_invoice_items,
+          ...relevant_nomenclature,
+        ]).slice(0, 24)
       }
     }
 
@@ -2654,6 +2765,14 @@ export async function GET(request: NextRequest) {
         ? dedupeNomenclature(nomenclature_analogs).slice(0, 40)
         : sortXpsNomenclature(dedupeNomenclature(cleanXpsAnalogs)).slice(0, 20)
     }
+  }
+
+  if (hasProfileSheetDirectQuery && relevant_nomenclature.length > 0) {
+    relevant_nomenclature = sortProfileSheetNomenclature(dedupeNomenclature(relevant_nomenclature)).slice(0, 24)
+  }
+
+  if (hasLogicroofMastDirectQuery && relevant_nomenclature.length > 0) {
+    relevant_nomenclature = sortLogicroofMastNomenclature(dedupeNomenclature(relevant_nomenclature)).slice(0, 20)
   }
 
   if (!product_id && relevant_nomenclature.length > 0 && (queryNumbers.length > 0 || hasConstructionInsulationQueryForNomenclature || hasPvcMembraneQueryForNomenclature || hasRoofFunnelQueryForNomenclature)) {
