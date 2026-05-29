@@ -232,6 +232,22 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
     };
   }
 
+  const axesContext = text.match(/(?:размер(?:ы|ами)|осях|в\s+осях)[\s\S]{0,220}/i)?.[0] ?? "";
+  const axesDimensionMatches = Array.from(axesContext.matchAll(/(\d{2,4}(?:[,.]\d+)?)\s*[xхХ*]\s*(\d{2,4}(?:[,.]\d+)?)\s*м/i));
+  for (const match of axesDimensionMatches) {
+    const first = match[1] ? toNumber(match[1]) : NaN;
+    const second = match[2] ? toNumber(match[2]) : NaN;
+    const area = first * second;
+    if (first > 0 && second > 0 && first <= 1000 && second <= 1000 && area > 0) {
+      return {
+        value: round(area, 2),
+        source: "axes_estimate",
+        confidence: "low",
+        note: `Площадь оценена по габаритам в осях ${first} x ${second} м. Для счета нужна площадь кровли по проекту/плану кровли.`,
+      };
+    }
+  }
+
   const axesMatch = text.match(new RegExp(`(?:размеры|осях|в\\s+осях)[^\\d]{0,80}${NUMBER}\\s*м?\\s*[xхХ*]\\s*${NUMBER}\\s*м`, "i"));
   if (axesMatch?.[1] && axesMatch?.[2]) {
     const first = toNumber(axesMatch[1]);
@@ -1006,8 +1022,20 @@ function parseAiThickness(text: string) {
   return match?.[1] ? toNumber(match[1]) : undefined;
 }
 
+function hasAiLayerAreaEvidence(layer: ProjectAiLayer) {
+  if (!layer.areaM2 || layer.areaM2 <= 0) return false;
+  const text = `${layer.sourceText ?? ""} ${layer.note ?? ""}`.replace(/\u00a0/g, " ");
+  const areaMatches = Array.from(text.matchAll(/(\d{1,3}(?:\s+\d{3})+|\d+(?:[,.]\d+)?)\s*\*?\s*(?:м\s*2|м2|м²|кв\.?\s*м)/gi));
+  return areaMatches.some((match) => {
+    const value = match[1] ? toLooseNumber(match[1]) : NaN;
+    if (!Number.isFinite(value)) return false;
+    return Math.abs(value - layer.areaM2!) <= Math.max(1, layer.areaM2! * 0.02);
+  });
+}
+
 function aiLayerArea(layer: ProjectAiLayer) {
   if (!layer.areaM2 || layer.areaM2 <= 0) return undefined;
+  if (!hasAiLayerAreaEvidence(layer)) return undefined;
   const explicitLayerCount = layer.layerCount && layer.layerCount > 1 ? layer.layerCount : undefined;
   const text = `${layer.role ?? ""} ${layer.material ?? ""} ${layer.note ?? ""}`.toLowerCase();
   const inferredLayerCount = explicitLayerCount ?? (/2\s*сло/i.test(text) ? 2 : 1);
