@@ -3789,12 +3789,16 @@ export async function GET(request: NextRequest) {
   const ruleMatchesCurrentTopic = (rule: any) => {
     const category = String(rule.category || '').toLowerCase()
     const haystack = `${rule.category || ''} ${rule.condition || ''} ${rule.rule_name || ''} ${rule.rule_text || ''}`.toLowerCase()
+    const isGlobalGroundingRule =
+      /глобально|не\s+выдум|только\s+из\s+контекст|код[ыа]?\s*1с\s+только\s+из/i.test(String(rule.rule_name || '').toLowerCase())
+
+    if (hasProfileSheetDirectQuery && requestedProfileMark) {
+      return isGlobalGroundingRule
+    }
 
     if (hasAnySystemQueryForContext) {
       const isDetectedSystemRule = isRuleForAnyDetectedSystem(rule)
       if (isDetectedSystemRule) return true
-      const isGlobalGroundingRule =
-        /глобально|не\s+выдум|только\s+из\s+контекст|код[ыа]?\s*1с\s+только\s+из/i.test(String(rule.rule_name || '').toLowerCase())
       if (isGlobalGroundingRule) return true
       if (/система\s+тн-|system_card|system_layer|tn_roof_|tn_facade_|tn_foundation_|tn_techins_/i.test(haystack)) {
         return false
