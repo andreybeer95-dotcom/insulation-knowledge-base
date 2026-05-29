@@ -623,25 +623,11 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
   const hasLogicroofVrpFr = /logicroof\s+v[-\s]*rp\s*fr/i.test(lower);
-  const hasPvcMembraneG1Requirement = /(?:logicroof\s+v[-\s]*rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[\s\S]{0,140}?(?:г\s*1|g\s*1)|(?:г\s*1|g\s*1)[\s\S]{0,140}?(?:logicroof\s+v[-\s]*rp|пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)/i.test(lower);
-  const hasPvcMembraneG1ThicknessConflict = hasPvcMembraneG1Requirement && pvcMembraneThicknessMm === 1.5;
   const hasCarbonProfSlope = /carbon\s+prof\s+slope|карбон\s+проф\s+slope/i.test(lower);
   const hasPlainCarbonProf = /carbon\s+prof(?!\s+slope)|карбон\s+проф(?!\s+slope)/i.test(lower);
   const hasCarbonProf = hasPlainCarbonProf;
   const roofWoolLayers = detectRoofWoolLayers(lower);
-  const hasSegmentedRoofSpec = roofSpecAreas.membraneOnConcreteArea > 0 || roofSpecAreas.membraneOnProfiledSheetArea > 0;
-  const roofWoolLayersForUse = roofWoolLayers.filter((layer) => {
-    if (
-      hasSegmentedRoofSpec &&
-      /технор[уо]ф\s+н\s+проф/i.test(layer.label) &&
-      layer.thicknessMm === 100 &&
-      roofSpecAreas.membraneOnProfiledSheetArea > 0
-    ) {
-      return false;
-    }
-    return true;
-  });
-  const roofWoolLayersWithStatementQuantities = roofWoolLayersForUse.map((layer) => {
+  const roofWoolLayersWithStatementQuantities = roofWoolLayers.map((layer) => {
     const isTechnorufNProf50 =
       /технор[уо]ф\s+н\s+проф/i.test(layer.label) &&
       layer.thicknessMm === 50 &&
@@ -707,11 +693,8 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         : undefined,
       quantityType: "m2",
       thicknessMm: pvcMembraneThicknessMm,
-      reviewOnly: hasPvcMembraneG1ThicknessConflict,
       note: pvcMembraneThicknessMm
-        ? hasPvcMembraneG1ThicknessConflict
-          ? "В проекте одновременно указаны LOGICROOF V-RP 1,5 мм и требование Г1/G1. По правилу менеджера это конфликт: Г1-мембрана обычно идет 1,2 мм, поэтому в счет не ставить без уточнения, что важнее для заказчика: толщина 1,5 мм или группа горючести Г1."
-          : "Марку и толщину мембраны сверить по проекту перед КП."
+        ? "Марку и толщину мембраны сверить по проекту перед КП."
         : roofStatementQuantities.logicroofVrpM2 > 0
           ? "Количество LOGICROOF V-RP взято из ведомости материалов кровли, но толщина мембраны не указана; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм."
           : "В проекте указана LOGICROOF V-RP без толщины; код 1С и счетную позицию ставить только после уточнения толщины 1,2/1,5/1,8/2,0 мм.",
@@ -1006,10 +989,6 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       factor: 1.03,
       thicknessMm: xpsThicknessMm,
       quantityType: xpsThicknessMm ? "m3" : "m2",
-      reviewOnly: hasSegmentedRoofSpec && !hasPlainCarbonProf,
-      note: hasSegmentedRoofSpec && !hasPlainCarbonProf
-        ? "XPS/экструзионный пенополистирол найден в проекте, но не привязан к выделенному типу мембранной кровли; в счет не ставить без проверки листа состава/ведомости."
-        : undefined,
     },
     {
       key: "keramzit_slope",
@@ -1987,15 +1966,13 @@ function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureI
 
   if (layer.quantityType === "m2") {
     const qty = basisArea * (layer.factor ?? 1);
-    const packageArea = parsePackageArea(item?.name ?? null);
-    const rollArea = packageArea === null ? parseRollArea(item?.name ?? null) : null;
+    const rollArea = parseRollArea(item?.name ?? null);
+    const rolls = rollArea !== null ? Math.ceil(qty / rollArea) : null;
     return {
       value: round(qty, 2),
-      text: packageArea !== null
-        ? `${round(qty, 2)} м2, ориентир ${Math.ceil(qty / packageArea)} уп. по ${round(packageArea, 4)} м2`
-        : rollArea !== null
-          ? `${round(qty, 2)} м2, ориентир ${Math.ceil(qty / rollArea)} рул. по ${round(rollArea, 2)} м2`
-          : `${round(qty, 2)} м2`,
+      text: rolls !== null && rollArea !== null
+        ? `${round(qty, 2)} м2, ориентир ${rolls} рул. по ${round(rollArea, 2)} м2`
+        : `${round(qty, 2)} м2`,
     };
   }
 
