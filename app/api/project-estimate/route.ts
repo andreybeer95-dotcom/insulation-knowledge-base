@@ -95,6 +95,12 @@ type AreaInfo = {
   source: "manager_input" | "pdf_text" | "axes_estimate" | "roof_plan_estimate" | "not_found";
   confidence: "high" | "medium" | "low" | "none";
   note: string;
+  dimensions?: {
+    lengthM: number;
+    widthM: number;
+    perimeterM: number;
+    source: "roof_plan_dimensions" | "axes_dimensions";
+  };
 };
 
 type DetectedLayer = {
@@ -149,7 +155,7 @@ function looksLikeRoofPlan(text: string) {
   return /план\s+кровл|тн-кровля|tn-кровля|кровл[\s\S]{0,120}уклон|воронк[\s\S]{0,80}водосток/i.test(text);
 }
 
-function detectRoofPlanDimensionArea(text: string) {
+function detectRoofPlanDimensionMetrics(text: string) {
   if (!looksLikeRoofPlan(text)) return null;
 
   const scanWindow = text.slice(0, Math.min(text.length, 3500));
@@ -168,6 +174,7 @@ function detectRoofPlanDimensionArea(text: string) {
     first,
     second,
     area: round(area, 2),
+    perimeter: round((first + second) * 2, 2),
   };
 }
 
@@ -277,6 +284,12 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
         source: "axes_estimate",
         confidence: "low",
         note: `Площадь оценена по габаритам в осях ${first} x ${second} м. Для счета нужна площадь кровли по проекту/плану кровли.`,
+        dimensions: {
+          lengthM: first,
+          widthM: second,
+          perimeterM: round((first + second) * 2, 2),
+          source: "axes_dimensions",
+        },
       };
     }
   }
@@ -292,17 +305,29 @@ function detectRoofArea(text: string, manualArea: string | null): AreaInfo {
         source: "axes_estimate",
         confidence: "low",
         note: `Площадь оценена по габаритам в осях ${first} x ${second} м. Для счета нужна площадь кровли по проекту.`,
+        dimensions: {
+          lengthM: first,
+          widthM: second,
+          perimeterM: round((first + second) * 2, 2),
+          source: "axes_dimensions",
+        },
       };
     }
   }
 
-  const roofPlanArea = detectRoofPlanDimensionArea(text);
-  if (roofPlanArea) {
+  const roofPlanMetrics = detectRoofPlanDimensionMetrics(text);
+  if (roofPlanMetrics) {
     return {
-      value: roofPlanArea.area,
+      value: roofPlanMetrics.area,
       source: "roof_plan_estimate",
       confidence: "low",
-      note: `Площадь предварительно оценена по габаритной размерной цепочке плана кровли: ${roofPlanArea.first} x ${roofPlanArea.second} м. Это площадь габаритного прямоугольника; для счета нужно сверить контур, вырезы, перепады и ведомость кровли.`,
+      note: `Площадь предварительно оценена по габаритной размерной цепочке плана кровли: ${roofPlanMetrics.first} x ${roofPlanMetrics.second} м. Ориентир периметра для парапетов/примыканий: ${roofPlanMetrics.perimeter} м. Для счета нужно сверить контур, вырезы, перепады и ведомость кровли.`,
+      dimensions: {
+        lengthM: roofPlanMetrics.first,
+        widthM: roofPlanMetrics.second,
+        perimeterM: roofPlanMetrics.perimeter,
+        source: "roof_plan_dimensions",
+      },
     };
   }
 
@@ -329,6 +354,20 @@ function detectUnitCount(text: string, keyword: RegExp) {
     if (keywordPattern.test(context)) return Number(match[1]);
   }
   return undefined;
+}
+
+function detectRoofDrainLabelCount(text: string) {
+  if (!looksLikeRoofPlan(text) && !/водосток|воронк|план\s+кровл/i.test(text)) return undefined;
+
+  const labels = new Set<string>();
+  for (const match of text.matchAll(/\b(в[вп])\s*[-–—]?\s*(\d{1,3})\b/gi)) {
+    const prefix = (match[1] ?? "").toLowerCase();
+    const number = match[2] ?? "";
+    if (!number) continue;
+    labels.add(`${prefix}-${number}`);
+  }
+
+  return labels.size > 0 ? labels.size : undefined;
 }
 
 function normalizeRoofStatementText(text: string) {
@@ -615,6 +654,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const lower = `${text} ${question}`.toLowerCase();
   const hasRoofPlanContext = looksLikeRoofPlan(text);
   const roofStatementQuantities = extractRoofMaterialStatementQuantities(text);
+  const hasPvcRoofSystem = includesAny(lower, [/logicroof/i, /plastfoil|пластфойл/i, /ecoplast/i, /пвх[а-я\s-]*мембран/i, /полимерн[а-я\s-]*мембран/i]);
   const xpsThicknessMatch = lower.match(/(?:xps|эппс|экструдированн[а-я\s-]*пенополистирол|экструзионн[а-я\s-]*пенополистирол|пенополистирол|carbon\s+prof)[^\d]{0,80}(\d{2,3})\s*мм/i);
   const xpsThicknessMm = xpsThicknessMatch?.[1] ? Number(xpsThicknessMatch[1]) : undefined;
   const roofSpecAreas = extractRoofSpecAreas(lower);
@@ -676,8 +716,11 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
   const hasParapetFunnel = includesAny(lower, [/воронк[а-я\s-]*парапет/i, /парапет[а-я\s-]*воронк/i]);
   const hasSquareParapetFunnel = hasParapetFunnel && /100\s*[xх*]\s*100\s*[xх*]\s*600/i.test(lower);
   const hasInternalFunnelOnRoofPlan = hasRoofPlanContext && /воронк[\s\S]{0,120}внутренн[\s\S]{0,60}водосток/i.test(lower);
+  const roofDrainLabelCount = detectRoofDrainLabelCount(text);
   const geberitPluviaUnitCount = hasGeberitPluvia ? detectGeberitPluviaCount(lower) : undefined;
-  const funnelUnitCount = hasParapetFunnel ? detectParapetFunnelCount(lower) ?? detectUnitCount(lower, /воронк[а-я]*/) : detectUnitCount(lower, /воронк[а-я]*/);
+  const funnelUnitCount = hasParapetFunnel
+    ? detectParapetFunnelCount(lower) ?? detectUnitCount(lower, /воронк[а-я]*/) ?? roofDrainLabelCount
+    : detectUnitCount(lower, /воронк[а-я]*/) ?? roofDrainLabelCount;
 
   const keramzitSlope = lower.match(/керамзит[а-я\s-]*грав[а-я\s-]*?(\d{2,3})\s*(?:\.{2,3}|-)\s*(\d{2,3})\s*мм/i);
   const keramzitAvg = keramzitSlope?.[1] && keramzitSlope?.[2]
@@ -800,6 +843,57 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
       quantityType: "project",
       reviewOnly: true,
       note: "Доборные элементы считать по узлам и длинам примыканий; замену оцинкованного Г-профиля на ПВХ-металл согласовать по узлам.",
+    },
+    {
+      key: "pvc_detail_membrane_default",
+      role: "комплектация ПВХ-узлов/примыканий",
+      label: "Неармированная ПВХ-мембрана для примыканий и обводок",
+      detected: hasPvcRoofSystem && includesAny(lower, [/примыкан|парапет|воронк|узл|обводк|пвх|logicroof/i]),
+      searchTerms: ["ПВХ Logicroof V-SR 1,5", "Logicroof V-SR", "ПВХ мембрана неармированная", "Plastfoil Art"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "По правилу менеджера ПВХ-комплектацию узлов добавлять к проверке: неармированная мембрана нужна для примыканий, углов и обводок. Количество считать по узлам/периметру/ведомости, не по общей площади кровли.",
+    },
+    {
+      key: "pvc_cleaner_default",
+      role: "комплектация ПВХ-кровли/очистка швов",
+      label: "Очиститель для ПВХ-мембран",
+      detected: hasPvcRoofSystem,
+      searchTerms: ["Очиститель для ПВХ мембран ТехноНИКОЛЬ", "Спрей-очиститель для ПВХ мембран", "Очиститель ПВХ мембран"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "Добавлять к проверке для сварки ПВХ: очиститель нужен перед проваркой загрязненных швов и узлов. Количество считать по площади/узлам или по калькулятору, без нормы в проекте автоматически в счет не ставить.",
+    },
+    {
+      key: "liquid_pvc_default",
+      role: "комплектация ПВХ-кровли/герметизация швов",
+      label: "Жидкий ПВХ",
+      detected: hasPvcRoofSystem,
+      searchTerms: ["Жидкий ПВХ ТехноНИКОЛЬ серый 1л", "Жидкий ПВХ ТН серый 1л", "Жидкий ПВХ"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "Добавлять к проверке для промазки швов и проходок на примыканиях. Количество зависит от узлов и карты сварки; без нормы/ведомости в счет не ставить.",
+    },
+    {
+      key: "roof_aerator",
+      role: "узлы кровли/аэраторы",
+      label: "Кровельный аэратор",
+      detected: includesAny(lower, [/аэратор/i]),
+      searchTerms: ["Аэратор кровельный ТехноНИКОЛЬ", "Аэратор кровельный", "ПВХ аэратор кровельный"],
+      quantityType: "project",
+      unitCount: detectUnitCount(lower, /аэратор[а-я]*/),
+      reviewOnly: true,
+      note: "Аэраторы считать по узлам проекта или по калькулятору; если проект не задает количество, вынести на согласование.",
+    },
+    {
+      key: "roof_walkway",
+      role: "эксплуатационные дорожки",
+      label: "Пешеходная/техническая дорожка по кровле",
+      detected: includesAny(lower, [/дорожк[а-я\s-]*кровл|пешеходн[а-я\s-]*дорожк|walkway|логикруф[\s\S]{0,40}пазл|puzzle/i]),
+      searchTerms: ["LOGICROOF Walkway Puzzle", "ПВХ Logicroof Walkway Puzzle", "Дорожка пешеходная кровельная"],
+      quantityType: "project",
+      reviewOnly: true,
+      note: "Дорожки считать в погонных метрах/штуках по плану перемещения и обслуживания оборудования; если длина не указана, в счет не ставить.",
     },
     {
       key: "logicpir_prof_statement_40",
@@ -1139,7 +1233,9 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
         : ["Воронка ТехноНИКОЛЬ", "Воронка кровельная", "Воронка с обжимным фланцем"],
       quantityType: "project",
       unitCount: funnelUnitCount,
-      note: hasInternalFunnelOnRoofPlan
+      note: roofDrainLabelCount
+        ? `Количество воронок предварительно снято с обозначений ВВ/ВП на плане кровли: ${roofDrainLabelCount} шт. Перед КП сверить тип, диаметр, обогрев и схему водоотвода.`
+        : hasInternalFunnelOnRoofPlan
         ? "Воронки внутреннего водостока указаны на плане/в примечаниях кровли. Количество нужно снять с графики плана кровли или ведомости; тип, диаметр, обогрев и совместимость с системой подтвердить перед КП."
         : "Количество и тип воронок считать по проекту или калькулятору NAV.TN; в счет ставить только после подтверждения водосборных участков.",
     },
@@ -2326,6 +2422,21 @@ function buildProjectSystemRoleLines(system: ProjectSystemContext | null) {
       "- пароизоляция: Паробарьер СА500 / СФ1000 / указанная в проекте, считать площадь × 1,12;",
       "- основание профлист: по КМ/КМД, автоматически в счет кровельных материалов не ставить;",
       "- водоотвод: воронки/желоба только по проекту водоотвода или калькулятору.",
+    ];
+  }
+
+  if (name.includes("тн кровля смарт pir") || name.includes("тн кровля смарт пир")) {
+    return [
+      "Скелет системы ТН-КРОВЛЯ Смарт PIR для расчета:",
+      "- сначала определить площадь и периметр кровли по ведомости/плану; периметр нужен для парапетов и примыканий;",
+      "- кровельный ковер: LOGICROOF V-RP / PRO V-RP, считать площадь × 1,15; толщину и группу горючести сверять по проекту;",
+      "- нижний слой утепления: ТЕХНОРУФ Н ПРОФ / Н ОПТИМА / Н30 по проекту, считать площадь × 1,03 × толщину;",
+      "- верхний слой PIR: LOGICPIR PROF по проекту, считать площадь × 1,03 × толщину;",
+      "- уклоны и контруклоны: LOGICPIR SLOPE / CARBON PROF SLOPE / ТЕХНОРУФ КЛИН считать только по плану уклонов или отдельному калькулятору;",
+      "- пароизоляция: брать марку из проекта; считать площадь × 1,12;",
+      "- крепеж: финально по ветровому расчету, предварительный ориентир можно давать отдельно;",
+      "- ПВХ-комплектация узлов: неармированная мембрана, очиститель ПВХ, жидкий ПВХ, рейки/планки — по узлам, периметру и ведомости;",
+      "- водоотвод: количество ВВ/ВП снимать с плана кровли или брать из ведомости; если воронок нет, запросить схему водоотвода.",
     ];
   }
 
