@@ -314,7 +314,7 @@ function detectUnitCount(text: string, keyword: RegExp) {
   const unitMatches = Array.from(text.matchAll(/(\d{1,4})\s*шт/gi));
   for (const match of unitMatches) {
     const index = match.index ?? 0;
-    const context = text.slice(Math.max(0, index - 160), index + 160);
+    const context = text.slice(Math.max(0, index - 320), index + 320);
     const hasFunnelQuantityTable =
       /спецификац[\s\S]{0,140}воронк|ведомост[\s\S]{0,140}воронк|воронк[\s\S]{0,140}(?:кол-?во|количество)/i.test(context);
     const isTypicalNodeQuantity =
