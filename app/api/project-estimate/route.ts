@@ -486,6 +486,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     ?? lower.match(/logicroof\s+v-rp[^\d]{0,40}(1[,.][258]|2[,.]0|2)/i)
     ?? lower.match(/(?:пвх[а-я\s-]*мембран|полимерн[а-я\s-]*мембран)[^\d]{0,50}(\d(?:[,.]\d)?)\s*мм/i);
   const pvcMembraneThicknessMm = pvcMembraneThicknessMatch?.[1] ? toNumber(pvcMembraneThicknessMatch[1]) : undefined;
+  const hasLogicroofVrpFr = /logicroof\s+v[-\s]*rp\s*fr/i.test(lower);
   const roofWoolLayers = detectRoofWoolLayers(lower);
   const plastfoilLayers = detectPlastfoilLayers(lower);
   const mainPvcMembraneArea = plastfoilLayers.find((layer) => layer.key === "pvc_plastfoil_classic")?.areaOverride
@@ -515,10 +516,14 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
     {
       key: "pvc_logicroof_vrp",
       role: "кровельная ПВХ-мембрана",
-      label: pvcMembraneThicknessMm ? `LOGICROOF V-RP ${pvcMembraneThicknessMm} мм` : "LOGICROOF V-RP",
+      label: pvcMembraneThicknessMm ? `LOGICROOF V-RP${hasLogicroofVrpFr ? " FR" : ""} ${pvcMembraneThicknessMm} мм` : `LOGICROOF V-RP${hasLogicroofVrpFr ? " FR" : ""}`,
       detected: includesAny(lower, [/logicroof\s+v-rp/i, /полимерн[а-я\s-]*мембран[а-я\s-]*logicroof/i]),
       searchTerms: pvcMembraneThicknessMm
-        ? [`Logicroof V-RP ${String(pvcMembraneThicknessMm).replace(".", ",")}`, `Logicroof V-RP ${pvcMembraneThicknessMm}`, "ПВХ Logicroof V-RP"]
+        ? [
+          `Logicroof V-RP${hasLogicroofVrpFr ? " FR" : ""} ${String(pvcMembraneThicknessMm).replace(".", ",")}`,
+          `Logicroof V-RP${hasLogicroofVrpFr ? " FR" : ""} ${pvcMembraneThicknessMm}`,
+          "ПВХ Logicroof V-RP",
+        ]
         : [],
       factor: 1.15,
       areaOverride: roofSpecAreas.membraneTotalArea > 0 ? roofSpecAreas.membraneTotalArea : undefined,
@@ -1045,13 +1050,18 @@ function buildAiDetectedLayers(extraction: ProjectAiExtraction): DetectedLayer[]
     }
 
     if (/logicroof\s+v-rp|пвх[а-я\s-]*мембран/.test(text)) {
+      const isFr = /v[-\s]*rp\s*fr/i.test(text);
       return {
         key: "pvc_logicroof_vrp",
         role: "кровельная ПВХ-мембрана",
-        label: thicknessMm ? `LOGICROOF V-RP ${thicknessMm} мм` : material || "LOGICROOF V-RP",
+        label: thicknessMm ? `LOGICROOF V-RP${isFr ? " FR" : ""} ${thicknessMm} мм` : material || `LOGICROOF V-RP${isFr ? " FR" : ""}`,
         detected: true,
         searchTerms: thicknessMm
-          ? [`Logicroof V-RP ${String(thicknessMm).replace(".", ",")}`, `Logicroof V-RP ${thicknessMm}`, "ПВХ Logicroof V-RP"]
+          ? [
+            `Logicroof V-RP${isFr ? " FR" : ""} ${String(thicknessMm).replace(".", ",")}`,
+            `Logicroof V-RP${isFr ? " FR" : ""} ${thicknessMm}`,
+            "ПВХ Logicroof V-RP",
+          ]
           : ["ПВХ Logicroof V-RP", "Logicroof V-RP"],
         factor: 1.15,
         thicknessMm,
@@ -1494,15 +1504,26 @@ function itemScore(item: NomenclatureItem, layer: DetectedLayer) {
 
 function hasCriticalThicknessMismatch(layer: DetectedLayer, item: NomenclatureItem | null) {
   if (!item?.name || !layer.thicknessMm) return false;
-  if (
-    layer.key !== "pvc_logicroof_vrp" &&
-    !layer.key.startsWith("pvc_plastfoil_classic") &&
-    !layer.key.startsWith("pvc_plastfoil_art")
-  ) return false;
-
   const name = item.name.toLowerCase();
-  const itemThickness = name.match(/(?:^|\s|\()(1[,.][258]|2[,.]0|2)\s*(?:мм|mm|[xх*])?/i)?.[1]?.replace(",", ".");
-  return Boolean(itemThickness && itemThickness !== String(layer.thicknessMm));
+
+  if (
+    layer.key === "pvc_logicroof_vrp" ||
+    layer.key.startsWith("pvc_plastfoil_classic") ||
+    layer.key.startsWith("pvc_plastfoil_art")
+  ) {
+    const itemThickness = name.match(/(?:^|\s|\()(1[,.][258]|2[,.]0|2)\s*(?:мм|mm|[xх*])?/i)?.[1]?.replace(",", ".");
+    return Boolean(itemThickness && itemThickness !== String(layer.thicknessMm));
+  }
+
+  if (
+    layer.quantityType === "m3" &&
+    /технор[уо]ф|xps|carbon|logicpir|pir|dirock|руф|пенополистирол/i.test(`${layer.key} ${layer.label} ${item.name}`)
+  ) {
+    const itemThickness = parseBoardThicknessMm(item.name);
+    return Boolean(itemThickness && itemThickness !== layer.thicknessMm);
+  }
+
+  return false;
 }
 
 async function findNomenclature(layer: DetectedLayer) {
@@ -1596,6 +1617,23 @@ function parsePackageVolume(name: string | null) {
   if (!last) return null;
   const value = toNumber(last);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function parseBoardThicknessMm(name: string | null) {
+  if (!name) return null;
+  const dimensionMatches = Array.from(name.matchAll(/[xхХ*]\s*(\d{2,3})\s*(?:мм|mm)?(?=\D|$)/gi));
+  const lastDimension = dimensionMatches.length ? dimensionMatches[dimensionMatches.length - 1]?.[1] : undefined;
+  if (lastDimension) {
+    const value = Number(lastDimension);
+    if (Number.isFinite(value) && value >= 10 && value <= 300) return value;
+  }
+
+  const mmMatch = name.match(/(?:^|\s)(\d{2,3})\s*(?:мм|mm)(?=\D|$)/i);
+  if (mmMatch?.[1]) {
+    const value = Number(mmMatch[1]);
+    if (Number.isFinite(value) && value >= 10 && value <= 300) return value;
+  }
+  return null;
 }
 
 function buildQuantity(layer: DetectedLayer, area: AreaInfo, item: NomenclatureItem | null) {
@@ -2318,7 +2356,7 @@ export async function POST(request: NextRequest) {
           searchTerms: layer.searchTerms,
           calculation: quantity.text,
           note: missingReason,
-          code: primary?.code ?? null,
+          code: hasThicknessMismatch ? null : primary?.code ?? null,
           material: primary?.name ?? null,
           brand: primary?.brand ?? null,
           alternatives: matches.slice(1).map((item) => ({
