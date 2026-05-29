@@ -916,7 +916,7 @@ function detectLayers(text: string, question = ""): DetectedLayer[] {
           : hasTechnobarrier && !hasParobarrierC
             ? "ТЕХНОБАРЬЕР"
             : "ТЕХНОБАРЬЕР / Паробарьер C",
-      detected: includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i, /паробарьер\s*[сc][аa]\s*500/i]),
+      detected: !hasSegmentedVaporBarrierSpec && includesAny(lower, [/технобарьер/i, /паробарьер\s*с/i, /паробарьер\s*[сc][аa]\s*500/i]),
       searchTerms: hasParobarrierCa500
         ? ["Паробарьер СА 500", "Паробарьер СА500", "Паробарьер"]
         : hasParobarrierC && !hasTechnobarrier
