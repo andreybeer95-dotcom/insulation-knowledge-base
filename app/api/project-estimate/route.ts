@@ -1869,6 +1869,9 @@ function buildRoofFastenerGuidance(text: string, question: string) {
     scope: "механическое крепление мембраны/утеплителя в кровельных системах",
     rules: [
       "Крепеж подбирается по общей толщине теплоизоляции и типу основания.",
+      "Если есть уклонка/контруклон, длину крепежа нельзя брать только по базовой толщине утеплителя: считать по максимальной толщине участка = основной пирог + уклон/контруклон.",
+      "Для участков с клиновидной изоляцией сначала нужна раскладка элементов уклона; после нее определяется максимальная толщина и длина телескопа/самореза.",
+      "Крепеж должен иметь достаточное заглубление в основание; ориентир из консультации — не менее 40 мм, финально сверять по техлисту крепежа и основанию.",
       "Комплект для мембраны: телескопический крепеж + саморез; для бетонного основания дополнительно нужен нейлоновый дюбель/анкерный элемент.",
       "Для профлиста применяется сверлоконечный саморез; для бетона — остроконечный саморез в дюбель/анкер после засверливания.",
       "Пример из консультации: при 150 мм утепления нужен телескопический крепеж 120 мм и саморез 70 мм.",
@@ -1882,6 +1885,41 @@ function buildRoofFastenerGuidance(text: string, question: string) {
       membraneFieldKitsPerM2: 4,
       totalFieldFastenersPerM2: 6,
     },
+  };
+}
+
+function buildRoofSlopeGuidance(text: string, question: string, layers: DetectedLayer[]) {
+  const signalText = `${text} ${question}`.toLowerCase();
+  const hasSlopeLayer = layers.some((layer) =>
+    /slope|клин|уклон|разуклон|контруклон/i.test(`${layer.key} ${layer.role} ${layer.label}`)
+  );
+  const asksAboutSlope = /уклон|разуклон|контруклон|клин|slope|logicpir\s+slope|carbon\s+prof\s+slope/i.test(signalText);
+  const hasDrainGeometrySignal = /воронк|парапет|водоотвод|водосток/i.test(signalText) && /план\s+кровл|кровл|покрыт/i.test(signalText);
+  const shouldMention = hasSlopeLayer || asksAboutSlope || hasDrainGeometrySignal;
+
+  return {
+    shouldMention,
+    source: "комментарий специалиста по расчету уклонов/контруклонов, обновлено 2026-06-01",
+    calculatorUrl: "https://nav.tn.ru/calculators/",
+    rules: [
+      "Основную кровлю считать отдельно: площадь, периметр/парапеты, воронки, аэраторы, базовый крепеж поля.",
+      "Уклонку и контруклон добавлять отдельным блоком после основного расчета, а не размазывать по общей площади кровли.",
+      "LOGICPIR SLOPE / CARBON PROF SLOPE / ТЕХНОРУФ КЛИН нельзя считать как просто '30 м2 уклона': нужен план раскладки клиновидных элементов.",
+      "Для контруклона около воронок нужны параметры фигуры: основной уклон или контруклон, форма фигуры, расстояние между воронками/основание треугольника, уклон %, смещение воронки от парапета, количество одинаковых фигур.",
+      "Смещение парапетных воронок от парапета не придумывать: брать из проекта, например 500-600 мм, если это указано на плане.",
+      "Результат уклонки должен быть в элементах/марках клиновидных плит (например G/K/D или аналоги производителя), а не только в м2.",
+      "Для крепежа на участке уклонки использовать максимальную толщину: базовая теплоизоляция + высота уклона/контруклона в верхней точке.",
+    ],
+    requiredInputs: [
+      "план кровли или схема уклонов",
+      "тип: основной уклон или контруклон",
+      "положение и тип воронок",
+      "расстояние между воронками / основание фигуры",
+      "смещение воронок от парапета",
+      "уклон, %",
+      "количество одинаковых фигур",
+      "толщина основного пирога для подбора длины крепежа",
+    ],
   };
 }
 
@@ -2727,6 +2765,7 @@ function buildQuoteDraft(summary: {
   analogRecommendations: AnalogRecommendation[];
   roofBreakdown?: RoofBreakdownSection[];
   roofFastenerGuidance?: ReturnType<typeof buildRoofFastenerGuidance>;
+  roofSlopeGuidance?: ReturnType<typeof buildRoofSlopeGuidance>;
   notFound: ReviewItem[];
   projectOnly: Array<{ role: string; material: string; note?: string }>;
 }) {
@@ -2829,6 +2868,15 @@ function buildQuoteDraft(summary: {
     lines.push(`- мембрана по полю: ${rates.membraneFieldKitsPerM2} комплект/м2 × ${summary.area.value} м2 = ${membraneFasteners} комплектов;`);
     lines.push(`- общий ориентир поля: ${rates.totalFieldFastenersPerM2} крепежных комплектов/м2 × ${summary.area.value} м2 = ${totalFasteners} шт/комплектов.`);
     lines.push("Финально крепеж считать по ветровому расчету: краевые, угловые и периметральные зоны могут потребовать больше.");
+  }
+
+  if (summary.roofSlopeGuidance?.shouldMention) {
+    lines.push("");
+    lines.push("Уклонка/контруклон:");
+    lines.push("- основной пирог кровли считается отдельно; уклонка добавляется отдельным блоком по плану уклонов/калькулятору;");
+    lines.push("- количество клиновидных плит не считать просто по м2: нужна раскладка элементов по фигурам вокруг воронок;");
+    lines.push("- для крепежа на уклонке длину подбирать по максимальной толщине участка: основной пирог + высота уклона/контруклона;");
+    lines.push("- чтобы посчитать уклонку, нужны: расстояние между воронками, смещение от парапета, уклон %, форма/количество одинаковых фигур и толщина основного пирога.");
   }
 
   const pendingQuantityLines = buildPendingQuantityLines(summary.notFound);
@@ -3010,6 +3058,7 @@ export async function POST(request: NextRequest) {
     }
 
     const roofFastenerGuidance = buildRoofFastenerGuidance(extractedText, question);
+    const roofSlopeGuidance = buildRoofSlopeGuidance(extractedText, question, layers);
     const roofDrainGuidance = buildRoofDrainGuidance(extractedText, question, layers);
     const detectedProjectSystem = detectProjectSystemContext(extractedText, layers);
     const projectSystem = detectedProjectSystem
@@ -3115,6 +3164,7 @@ export async function POST(request: NextRequest) {
       analogRecommendations,
       roofBreakdown,
       roofFastenerGuidance,
+      roofSlopeGuidance,
       notFound,
       projectOnly,
     });
@@ -3148,6 +3198,7 @@ export async function POST(request: NextRequest) {
       project_only: projectOnly,
       not_found: notFound,
       roof_fastener_guidance: roofFastenerGuidance,
+      roof_slope_guidance: roofSlopeGuidance,
       roof_drain_guidance: roofDrainGuidance,
     });
 
@@ -3173,6 +3224,7 @@ export async function POST(request: NextRequest) {
       projectOnly,
       notFound,
       roofFastenerGuidance,
+      roofSlopeGuidance,
       roofDrainGuidance,
       textPreview: isFullResponse ? extractedText.slice(0, 1800) : undefined,
     });
