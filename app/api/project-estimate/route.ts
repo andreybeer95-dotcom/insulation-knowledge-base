@@ -65,6 +65,50 @@ type ProjectSystemContext = {
   rules: SystemRuleContext[];
 };
 
+type CpqSystemLayer = {
+  id?: string | null;
+  layer_key?: string | null;
+  role?: string | null;
+  display_name?: string | null;
+  sequence_no?: number | null;
+  is_required?: boolean | null;
+  is_project_only?: boolean | null;
+  requires_project_quantity?: boolean | null;
+  quantity_basis?: string | null;
+  factor?: number | null;
+  formula_code?: string | null;
+  formula_text?: string | null;
+  source_note?: string | null;
+  constraints?: Record<string, unknown> | null;
+};
+
+type CpqCalculationRule = {
+  rule_key?: string | null;
+  role?: string | null;
+  sequence_no?: number | null;
+  formula_code?: string | null;
+  formula_text?: string | null;
+  input_requirements?: Record<string, unknown> | null;
+  output_unit?: string | null;
+  factor?: number | null;
+  requires_geometry?: boolean | null;
+  notes?: string | null;
+};
+
+type CpqSystemContext = {
+  system: {
+    id: string;
+    slug: string;
+    name: string;
+    direction: string;
+    source?: string | null;
+    status?: string | null;
+    description?: string | null;
+  };
+  layers: CpqSystemLayer[];
+  calculationRules: CpqCalculationRule[];
+};
+
 type QuoteItem = {
   no: number;
   code: string | null;
@@ -2472,6 +2516,71 @@ async function loadProjectSystemRules(system: ProjectSystemContext | null) {
   }
 }
 
+async function loadCpqSystemContext(system: ProjectSystemContext | null): Promise<CpqSystemContext | null> {
+  if (!system) return null;
+
+  const slugs = Array.from(new Set([system.id, system.navAnalogId].filter(Boolean))) as string[];
+  if (!slugs.length) return null;
+
+  try {
+    const supabase = getServiceSupabase();
+    const { data: systems, error: systemError } = await supabase
+      .from("cpq_systems")
+      .select("id, slug, name, direction, source, status, description")
+      .in("slug", slugs)
+      .eq("is_active", true)
+      .order("priority", { ascending: true });
+
+    if (systemError) {
+      console.warn("cpq system search skipped:", errorMessage(systemError));
+      return null;
+    }
+
+    const selected = (systems ?? []).find((row: any) => row.slug === system.id)
+      ?? (systems ?? []).find((row: any) => row.slug === system.navAnalogId)
+      ?? (systems ?? [])[0];
+
+    if (!selected?.id) return null;
+
+    const [{ data: layers, error: layersError }, { data: calculationRules, error: rulesError }] = await Promise.all([
+      supabase
+        .from("cpq_system_layers")
+        .select("id, layer_key, role, display_name, sequence_no, is_required, is_project_only, requires_project_quantity, quantity_basis, factor, formula_code, formula_text, source_note, constraints")
+        .eq("system_id", selected.id)
+        .order("sequence_no", { ascending: true }),
+      supabase
+        .from("cpq_calculation_rules")
+        .select("rule_key, role, sequence_no, formula_code, formula_text, input_requirements, output_unit, factor, requires_geometry, notes")
+        .eq("system_id", selected.id)
+        .order("sequence_no", { ascending: true }),
+    ]);
+
+    if (layersError) {
+      console.warn("cpq layers search skipped:", errorMessage(layersError));
+    }
+    if (rulesError) {
+      console.warn("cpq calculation rules search skipped:", errorMessage(rulesError));
+    }
+
+    return {
+      system: {
+        id: selected.id,
+        slug: selected.slug,
+        name: selected.name,
+        direction: selected.direction,
+        source: selected.source,
+        status: selected.status,
+        description: selected.description,
+      },
+      layers: (layers ?? []) as CpqSystemLayer[],
+      calculationRules: (calculationRules ?? []) as CpqCalculationRule[],
+    };
+  } catch (error) {
+    console.warn("cpq context search failed:", errorMessage(error));
+    return null;
+  }
+}
+
 function buildProjectSystemRoleLines(system: ProjectSystemContext | null) {
   if (!system) return [];
 
@@ -2612,6 +2721,7 @@ function buildQuoteDraft(summary: {
   fileName: string;
   area: AreaInfo;
   systemContext?: ProjectSystemContext | null;
+  cpqContext?: CpqSystemContext | null;
   quoteItems: QuoteItem[];
   invoiceItems: InvoiceItem[];
   analogRecommendations: AnalogRecommendation[];
@@ -2648,6 +2758,25 @@ function buildQuoteDraft(summary: {
     const systemRoleLines = buildProjectSystemRoleLines(summary.systemContext);
     if (systemRoleLines.length) {
       lines.push(...systemRoleLines);
+    }
+    lines.push("");
+  }
+
+  if (summary.cpqContext?.layers.length) {
+    lines.push(`CPQ-карта системы: ${summary.cpqContext.system.name}`);
+    for (const layer of summary.cpqContext.layers.slice(0, 10)) {
+      const required = layer.is_required ? "обязательный" : "по проекту";
+      const projectOnly = layer.is_project_only ? "; проектный слой, не в счет автоматически" : "";
+      const quantity = layer.formula_text || layer.quantity_basis || "расчет по проекту";
+      lines.push(`- ${layer.role}: ${layer.display_name} — ${required}${projectOnly}; ${quantity}`);
+    }
+    const geometryRules = summary.cpqContext.calculationRules
+      .filter((rule) => rule.requires_geometry)
+      .map((rule) => rule.role || rule.rule_key)
+      .filter(Boolean)
+      .slice(0, 5);
+    if (geometryRules.length) {
+      lines.push(`Требуют отдельной геометрии/ведомости: ${geometryRules.join(", ")}.`);
     }
     lines.push("");
   }
@@ -2889,6 +3018,7 @@ export async function POST(request: NextRequest) {
         rules: await loadProjectSystemRules(detectedProjectSystem),
       }
       : null;
+    const cpqContext = await loadCpqSystemContext(projectSystem);
     const roofBreakdown = buildRoofBreakdown(extractedText);
     const projectQuery = buildProjectQuery({ direction, question, area, layers, systemContext: projectSystem });
 
@@ -2979,6 +3109,7 @@ export async function POST(request: NextRequest) {
       fileName: file.name,
       area,
       systemContext: projectSystem,
+      cpqContext,
       quoteItems,
       invoiceItems,
       analogRecommendations,
@@ -3006,6 +3137,8 @@ export async function POST(request: NextRequest) {
       chars: extractedText.length,
       area,
       ai_extraction: groundedAiExtraction,
+      project_system: projectSystem,
+      cpq_context: cpqContext,
       detected_layers: detectedLayers,
       invoice_items: invoiceItems,
       quote_items: quoteItems,
@@ -3035,6 +3168,7 @@ export async function POST(request: NextRequest) {
       analogRecommendations,
       quoteDraft,
       roofBreakdown,
+      cpqContext,
       projectSystem: isFullResponse ? projectSystem : compactProjectSystem(projectSystem),
       projectOnly,
       notFound,
