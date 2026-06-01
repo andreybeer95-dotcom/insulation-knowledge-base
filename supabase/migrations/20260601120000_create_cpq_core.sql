@@ -272,7 +272,7 @@ insert into public.cpq_calculation_rules (
 )
 select
   s.id, r.rule_key, r.role, r.sequence_no, r.formula_code, r.formula_text,
-  r.input_requirements, r.output_unit, r.factor, r.requires_geometry, r.notes
+  r.input_requirements, r.output_unit, r.factor::numeric, r.requires_geometry, r.notes
 from rule_rows r
 join system_rows s on s.slug = r.system_slug
 on conflict (system_id, rule_key) do update set
